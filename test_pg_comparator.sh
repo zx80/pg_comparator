@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 187 2004-08-25 09:41:15Z coelho $
+# $Id: test_pg_comparator.sh 201 2004-08-26 13:01:44Z coelho $
 #
 # test pg_comparator
 #
@@ -35,6 +35,8 @@ echo "BUILD size=$rows name=$name seed=$seed $(date)"
     # null different update
     echo "UPDATE ${name}1 SET c2=NULL WHERE id=$(($rows*2/3));"
     echo "UPDATE ${name}2 SET c3=NULL WHERE id=$(($rows*2/3));"
+
+    # exchange values in same idc? uneasy to test...
 
     # delete
     echo "DELETE FROM ${name}1 WHERE id=$(($rows/3));"

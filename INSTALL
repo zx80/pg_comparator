@@ -7,8 +7,21 @@ Simply use the pgxs makefile provided:
 You must only insure that the pg_config found in your path is the one
 of the target postgresql server.
 
+If you are fed up, you can remove all installed files with:
+
+	sh> gmake uninstall
+
+
 
 For prior versions:
 
-look at the postgresql documentation for compiling manually the C files
-into shared objects and for fixing the sql loading scripts.
+There is no reason why it should not work with other versions of PostgreSQL.
+Look at the postgresql documentation for compiling manually the C files
+into shared objects, for fixing the sql loading scripts, and for installing
+the stuff where expected.
+
+Alternativelly, you can copy all files in a contrib/pg_comparator directory
+within the PostgreSQL source tree, fix the makefile by looking at other
+contrib makefiles for defining proper macros and including some files, 
+and then gmake install/uninstall as above after PostgreSQL has been 
+properly configured.

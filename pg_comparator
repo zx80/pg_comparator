@@ -1,6 +1,6 @@
 #! /usr/local/bin/perl -w
 #
-# $Id: pg_comparator 190 2004-08-25 09:52:37Z coelho $
+# $Id: pg_comparator 210 2004-08-26 13:46:55Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -33,16 +33,16 @@ of the option name.
 
 =over 4
 
-=item B<--aggregate=xor>
+=item C<--aggregate=xor>
 
 Aggregation function to be used for summaries.
 Must operate on the result of the checksum function.
 
-=item B<--ask-pass>
+=item C<--ask-pass>
 
 Ask for passwords interactively.
 
-=item B<--checksum=cksum4>
+=item C<--checksum=cksum4>
 
 Checksum function to be used. The quality of this function in term
 of bit-spreading and uniformity is important for the quality of the
@@ -50,58 +50,58 @@ results. A poor function might miss differences because of collisions
 or result in a more costly search. Cryptographic hash functions such as 
 MD5 or SHA1 are a good choice.
 
-=item B<--factor=128>
+=item C<--factor=128>
 
 Folding factor: the number of rows grouped together at each stage.
 Default chosen after some basic tests on medium-size cases.
 
-=item B<--help>
+=item C<--help>
 
 Show short help.
 
-=item B<--man>
+=item C<--man>
 
 Show manual page.
 
-=item B<--max=32>
+=item C<--max=32>
 
 Maximum search effort, search will stop if above: it gives up if a 
 single query at any level involves more than this many differences. 
 Use 0 for no limit.
 
-=item B<--null="null_string(%s,'null')">
+=item C<--null="null_string(%s,'null')">
 
 String processing template to take care of null values.
 If you set --null='%s', null values are set as they appear,
 which might damage the results in null columns are used because 
 multi-column checksums will all be 0.
 
-=item B<--option>
+=item C<--option>
 
 Show option summary.
 
-=item B<--prefix=cmp>
+=item C<--prefix=cmp>
 
 Name prefix for comparison tables. May be schema-qualified.
 
-=item B<--separator=:>
+=item C<--separator=:>
 
 Separator string when concatenating columns.
 
-=item B<--source='DBI:Pg:dbname=%b;host=%h;port=%p;'>
+=item C<--source='DBI:Pg:dbname=%b;host=%h;port=%p;'>
 
 DBI source template. Changing this might allow to use this command 
 with another type of database, as the SQL used is quite standard.
 Tags are interpreted as follow: %b is base, %h is host, %p is port, %u 
 is login.
 
-=item B<--temporary --notemporary>
+=item C<--temporary --notemporary>
 
 Whether to use temporary tables. Default is to use.
 If you don't, the tables are kept at the end, so they will have
 to be deleted by hand.
 
-=item B<--verbose>
+=item C<--verbose>
 
 Be verbose about what is happening. The more you ask, the more verbose.
 
@@ -110,7 +110,8 @@ Be verbose about what is happening. The more you ask, the more verbose.
 =head1 ARGUMENTS
 
 The two arguments describe database connections with the following syntax,
-where square brackets denote optionnal parts:
+where square brackets denote optional parts. Although all parts
+are optional, the arguments must not be empty.
 
   [login[:pass]@][host[:port]][[/base]/[schema.]table[?[key:]cols]]
 
@@ -162,20 +163,24 @@ updates or deletes and of tuple keys.
 
 =item B<UPDATE k>
 
-Key "k" tuple was updated between table 1 to 2.
+Key I<k> tuple was updated between table 1 to 2.
 The tuple exists in both tables with different values.
 
 =item B<DELETE k>
 
-Key "k" tuple was deleted in table 2, assuming table 1 as the reference.
+Key I<k> tuple was deleted in table 2, assuming table 1 as the reference.
 The tuple only appears in table 1.
 
 =item B<INSERT k>
 
-Key "k" tuple was inserted into table 2, assuming table 1 as the reference.
+Key I<k> tuple was inserted into table 2, assuming table 1 as the reference.
 The tuple only appears in table 2.
 
 =back
+
+In case of key-checksum or data-checksum collision, false positive or
+false negative results may occur. Changing the checksum function would
+help in such cases.
 
 =head1 DEPENDENCES
 
@@ -185,54 +190,218 @@ Three support functions are needed on the database:
 
 =item 1
 
-The null_string function takes care of NULL values in columns.
-It may be changed with the --null option.
+The C<null_string> function takes care of NULL values in columns.
+It may be changed with the B<--null> option.
 
 A suitable implementation is available for PostgreSQL and can be loaded
-into the server by processing "share/contrib/null_string.sql".
+into the server by processing C<share/contrib/null_string.sql>.
 
 =item 2
 
 A checksum function must be used to reduce and distribute key
 and columns values. 
-It may be changed with the --checksum option.
+It may be changed with the B<--checksum> option.
 
 Three suitable implementations are available for PostgreSQL and can be loaded
-into the server by processing "share/contrib/checksum.sql".
-The three functions cksum2, cksum4 and cksum8 differ on the size
+into the server by processing C<share/contrib/checksum.sql>.
+The three functions C<cksum2>, C<cksum4> and C<cksum8> differ on the size
 of the resulting checksum expressed in bytes. The default is to use
-the cksum4 version.
+the C<cksum4> version.
 
 =item 3
 
 An aggregate function is used to summarize checksums for a range of rows. 
 It must operate on the result of the checksum function.
-It may be changed with the --aggregate option.
+It may be changed with the B<--aggregate> option.
 
-Suitable implementations of a xor aggregate are available for
-PostgreSQL and can be loaded into the server by processing 
-"share/contrib/xor_aggregate.sql".
+Suitable implementations of a exclusive-or C<xor> aggregate are available 
+for PostgreSQL and can be loaded into the server by processing 
+C<share/contrib/xor_aggregate.sql>.
 
 =back
 
 Moreover several perl modules are useful to run this script:
 
-    Getopt::Long for option management.
-    DBI and DBD::Pg to connect to PostgreSQL.
-    Term::ReadPassword if ask-pass option is triggered.
-    Pod::Usage if doc self-extraction (--man --opt --help) is required.
+=over 4
+
+=item 
+
+C<Getopt::Long> for option management.
+
+=item
+
+C<DBI> and C<DBD::Pg> to connect to PostgreSQL.
+
+=item
+
+C<Term::ReadPassword> for ask-pass option.
+
+=item
+
+C<Pod::Usage> for doc self-extraction (--man --opt --help).
+
+=back
 
 =head1 EXAMPLES
 
 Compare tables calvin and hobbes in default database on localhost, 
-with key "id" and columns "c1" and "c2":
+with key I<id> and columns I<c1> and I<c2>:
 
     ./pg_comparator /calvin?id:c1,c2 /hobbes
 
 Compare tables calvin in default database on localhost and the same
-table in default database on sablons, with key "id" and column "data":
+table in default database on sablons, with key I<id> and column I<data>:
 
     ./pg_comparator localhost/calvin?id:data sablons
+
+=head1 ALGORITHM
+
+The aim of the algorithm is to compare the content of two tables,
+possibly on different remote servers, with minimum network traffic.
+It is performed in three phases. 
+
+=over 2
+
+=item 1 
+
+A checksum table is computed on each side for the target table.
+
+=item 2 
+
+A fist level summary table is computed on each side by aggregating chunks
+of the checksum table. Other levels of summary aggregations are then performed
+till there is only one row in the last table, which then stores a 
+global checksum for the whole initial target tables. 
+
+=item 3 
+
+Starting from the upper summary tables, aggregated checksums are compared 
+from both sides to look for differences, down to the initial checksum table.
+Keys of differing tuples are displayed.
+
+=back
+
+=head2 CHECKSUM TABLE
+
+The first phase computes the initial cheksum table I<t(0)> on each side.
+Assuming that I<key> is the table key columns, and I<cols> is the
+table data columns that are to be checked for differences, then
+it is performed by querying target table I<t> as follow:
+
+  CREATE TABLE t(0) AS
+  SELECT key AS id, checksum(key) AS idc, checksum(key || cols) AS cks
+  FROM t;
+
+The inititial key is kept, as it will be used to show differing keys
+at the end. The rational for the I<idc> column is to randomize the 
+key-values distribution so as to balance aggrates in the next phase.
+The key must appear in the cheksum also, otherwise content exchanged 
+between two keys would not be detected in some cases.
+
+=head2 SUMMARY TABLES
+
+Now we compute a set of cascading summary tables by grouping I<f>
+(folding factor) checksums together at each stage. The grouping is
+based on a modulo on the I<idc> column to take advantage of the 
+checksum randomization. Starting from I<p=0> we build:
+
+  CREATE TABLE t(p+1) AS
+  SELECT MOD(idc, module(p+1)) AS idc, XOR(cks)
+  FROM t(p)
+  GROUP BY MOD(idc, module(p+1));
+
+The module(p) is defined so that it groups together on average I<f>
+checksums together: module(0) = size; module(p) = module(p-1)/f;
+This leads to a hierarchy of tables, each one being a smaller summary
+of the previous one:
+
+=over 4
+
+=item 0 
+
+level 0 checksum table, as many rows as the target table
+
+=item 1
+
+level 1 summary table, (size/f) rows
+
+=item p
+
+level p summary table, (size/f**p) rows
+
+=item n-1
+
+level n-1 summary table, less than f rows
+
+=item n
+
+level n summary table, 1 row
+
+=back
+
+It is important that the very same modules are used so that aggregations
+are the same, allowing to compare matching contents on both sides.
+
+=head2 SEARCH FOR DIFFERENCES
+
+After all these support tables are built on both sides comes the search for
+differences. When checking the checksum summary of the last tables (level I<n>)
+with only one row, it is basically a comparison of the cheksum of the 
+whole table contents. If they match, then both tables are equal, 
+and we are done. Otherwise, if these checksums differ, some investigation 
+is needed to detect offending keys.
+
+The investigation is performed by going down the table hierarchy and
+looking for all I<idc> for which there was a difference in the checksum
+on the previous level. The same query is performed on both side
+at each stage:
+
+  SELECT idc, cks
+  FROM t(p)
+  WHERE MOD(idc, module(p+1)) IN
+     (idc-with-differing-checksums-from-previous-level-p+1)
+  ORDER BY idc, cks;
+
+And the results from both sides are merged together. 
+When doing the merge procedure, four cases can arise:
+
+=over 2
+
+=item 1
+
+Both I<idc> and I<cks> match. Then there is no difference.
+
+=item 2
+
+Although I<idc> does match, I<cks> does not. Then this I<idc> is
+to be investigated at the next level, as the checksum summary differs.
+If we are already at the last level, then the offending key can be shown.
+
+=item 3
+
+No I<idc> match, one supplemental I<idc> in the first side.
+Then this I<idc> correspond to key(s) that have been deleted.
+
+=item 4
+
+No I<idc> match, one supplemental I<idc> in the second side.
+Then this I<idc> correspond to key(s) that have been inserted.
+
+=back
+
+Cases 3 and 4 are simply symetrical, and it is only an interpretation 
+to decide whether it is an insert or a delete, taking the first side 
+as the reference.
+
+=head2 IMPLEMENTATION ISSUES
+
+The checksum implementation gives integers, which are constant length.
+I use a xor aggregate as there is no overflow issue with it.
+Null values must be taken care of. The folding factor and all modules 
+are taken as power of two, so as to ease the retrieval of keys
+in some case, because then
+MOD(MOD(idc, module(p)),module(p+1))=MOD(idc,module(p+1)),
+thus one can skip intermediate modulos if necessary.
 
 =head1 ANALYSIS
 
@@ -249,7 +418,7 @@ It is independent of r, the lower f the better, and you want k<<n.
 =item 2
 
 The maximum number of requests is 6+2*ceil(log(n)/log(f)).
-The minimum is 6+ceil(log(n)/log(f)) if the two tables are equals.
+The minimum is 6+ceil(log(n)/log(f)) if the two tables are equal.
 
 =item 3
 
@@ -267,8 +436,9 @@ This script and algorithm was somehow inspired by:
 
 =over 2
 
-"Taming the Distributed Database Problem: A Case Study Using MySQL"
-by Giuseppe Maxia in "Sys Admin" vol 13 num 8, Aug 2004, pp 29-40.
+I<Taming the Distributed Database Problem: A Case Study Using MySQL>
+by Giuseppe Maxia in B<Sys Admin> vol 13 num 8, Aug 2004, pp 29-40.
+See L<http://www.perlmonks.org/index.pl?node_id=381053> for details.
 
 =back
 
@@ -295,18 +465,37 @@ as possible about table structures, types and values.
 =head1 SEE ALSO
 
 Some products implement such features, as for instance:
-    http://www.programurl.com/software/sql-server-comparison.htm
-    http://www.dbbalance.com/db_comparison.htm
-    http://www.dkgas.com/dbdiff.htm
+L<http://www.programurl.com/software/sql-server-comparison.htm>
+L<http://www.dbbalance.com/db_comparison.htm>
+L<http://www.dkgas.com/dbdiff.htm>
 
 =head1 BUGS
 
 All softwares have bugs. This is a software, hence it must have bugs.
 Reporting bugs is good practice, so tell me if you find one.
 
-=head1 VERSION
+=head1 VERSIONS
 
-$Revision: 190 $ see http://www.coelho.net/pg_comparator/
+See L<http://www.coelho.net/pg_comparator/> for the latest version.
+
+=over 4
+
+=item 1.1
+
+Fix algorithmic bug: checksums B<must> also include the key, 
+otherwise exchanged data could be not detected if the keys were 
+to be grouped together.
+
+Algorithmic section added to manual page.
+Thanks to I<Giuseppe Maxia> who asked for it.
+
+Various code cleanups.
+
+=item 1.0
+
+Initial revision.
+
+=back
 
 =head1 COPYRIGHT
 
@@ -414,7 +603,7 @@ sub compute_cheksum($$$$$)
 	     # ABS(idc) because of sql MOD may have negative remainder
 	     # idc needed to avoid assumptions about keys...
 	     " ABS($cksum(" . concat($keys) . ")) AS idc," .
-	     " $cksum(" . concat($cols) . ") AS cks " . # COUNT+SUM?
+	     " $cksum(" . concat("$keys,$cols") . ") AS cks " . # COUNT+SUM?
 	     "FROM $table");
     return count($dbh, "${name}0");
 }
@@ -425,13 +614,13 @@ sub compute_summaries($$@)
 {
     my ($dbh,$name,@modules) = @_;
     # compute cascade of summary tables
-    for my $n (1 .. @modules-1) {
-	print "building summary table ${name}$n ($modules[$n])\n" if $verb>1;
-	$dbh->do("CREATE $temp TABLE ${name}$n AS " .
-		 "SELECT MOD(idc,$modules[$n]) AS idc, $agg(cks) AS cks " .
-		 "FROM ${name}" . ($n-1) . " " .
-		 "GROUP BY MOD(idc,$modules[$n]) " .
-		 "ORDER BY idc ASC");
+    for my $level (1 .. @modules-1) {
+	print "building summary table ${name}$level ($modules[$level])\n" 
+	    if $verb>1;
+	$dbh->do("CREATE $temp TABLE ${name}${level} AS " .
+		 "SELECT MOD(idc,$modules[$level]) AS idc, $agg(cks) AS cks " .
+		 "FROM ${name}" . ($level-1) . " " .
+		 "GROUP BY MOD(idc,$modules[$level])");
     }
 }
 
@@ -444,7 +633,7 @@ sub selidc($$$$@)
 	$dbh->prepare("SELECT idc, cks" . ($get_id? ", id ": " ") .
 		      "FROM $table " .
 		      "WHERE MOD(idc,$module) IN (" . join(',', @idc) . ") " .
-		      "ORDER BY idc ASC");
+		      "ORDER BY idc, cks");
     $sth->execute();
     return $sth;
 }
@@ -455,24 +644,26 @@ sub selidc($$$$@)
 sub differences($$$$@)
 {
     my ($dbh1, $dbh2, $name1, $name2, @modules) = @_;
-    my $n = @modules-1;
+    my $level = @modules-1; # number of last summary table
     my $module = 1; # module of previous table
     my @idc = (0);
     my @next_idc = ();
 
-    while ($n>=0 and @idc)
+    while ($level>=0 and @idc)
     {
 	if ($max_report && @idc>$max_report) {
-	    print "giving up at level $n: too many differences.\n" .
+	    print "giving up at level $level: too many differences.\n" .
 		"\tadjust max option (current is $max_report) to proceed.\n" .
 		"\tidc list length is " . scalar @idc . ": @idc\n";
 	    return;
 	}
 
-	print "investigating @idc at level $n\n" if $verb>1;
-	my $s1 = selidc($dbh1, ${name1}.$n, $module, !$n, @idc);
-	my $s2 = selidc($dbh2, ${name2}.$n, $module, !$n, @idc);
-	my (@r1,@r2);
+	print "investigating @idc, level=$level\n" if $verb>1;
+	# select statement handlers
+	my $s1 = selidc($dbh1, ${name1}.$level, $module, !$level, @idc); 
+	my $s2 = selidc($dbh2, ${name2}.$level, $module, !$level, @idc);
+	# content of one row from the above select result
+	my (@r1,@r2); 
 	
 	# let us merge the two ordered select
 	while (1)
@@ -484,21 +675,21 @@ sub differences($$$$@)
 	    if (@r1 && @r2 && $r1[0]==$r2[0]) { # matching idc
 		if ($r1[1] != $r2[1]) { # non matching checksums
 		    push @next_idc, $r1[0]; # to be investigated...
-		    print "UPDATE $r1[2]\n" if not $n;
+		    print "UPDATE $r1[2]\n" if not $level;
 		}
 		@r1 = @r2 = ();
 	    }
 	    elsif ((!@r2) || (@r1 && $r1[0]<$r2[0])) { # more idc in table 1
-		print "DELETE ", $n? "$r1[0] at level $n": "$r1[2]", "\n";
+		print 'DELETE ', $level? "$r1[0] level=$level": "$r1[2]", "\n";
 		@r1 = ();
 	    } 
 	    elsif ((!@r1) || (@r2 && $r1[0]>$r2[0])) { # more idc in table 2
-		print "INSERT ", $n? "$r2[0] at level $n": "$r2[2]", "\n";
+		print 'INSERT ', $level? "$r2[0] level=$level": "$r2[2]", "\n";
 		@r2 = ();
 	    }
 	}
 	$s1->finish(); 	$s2->finish();
-	$n--; # next table
+	$level--; # next table! 0 is the initial checksum table
 	$module = pop @modules; # next module
 	@idc = @next_idc; # idcs to be investigated on next round
 	@next_idc = ();
