@@ -1,0 +1,9 @@
+provide xor-aggregate function for INT2, INT4, INT8 and BIT types.
+
+load with:
+
+	sh> psql < <path-to-postgresql>/share/contrib/xor_aggregate.sql
+
+use as:
+
+	pgsql> SELECT ..., XOR(column_name) FROM ... GROUP BY ...;

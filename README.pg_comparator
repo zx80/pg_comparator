@@ -1,0 +1,3 @@
+to get help about pg_comparator, do:
+
+	sh> pg_comparator --man

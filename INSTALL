@@ -1,0 +1,14 @@
+Postgresql 8.0 or better:
+
+Simply use the pgxs makefile provided:
+
+	sh> gmake install
+
+You must only insure that the pg_config found in your path is the one
+of the target postgresql server.
+
+
+For prior versions:
+
+look at the postgresql documentation for compiling manually the C files
+into shared objects and for fixing the sql loading scripts.

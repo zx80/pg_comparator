@@ -1,0 +1,12 @@
+provide fast NOT cryptographycally-secure checksum functions
+for TEXT, results being of INT2, INT4 and INT8 types.
+
+load with:
+
+	sh> psql < <path-to-postgresql>/share/contrib/checksum.sql
+
+use as:
+
+	psql> SELECT cksum2('some text');
+	psql> SELECT cksum4('some text');
+	psql> SELECT cksum8('some text');
