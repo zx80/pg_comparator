@@ -1,6 +1,6 @@
 #! /usr/local/bin/perl -w
 #
-# $Id: pg_comparator 220 2004-08-27 09:14:18Z coelho $
+# $Id: pg_comparator 239 2004-08-31 11:46:18Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -42,7 +42,7 @@ Must operate on the result of the checksum function.
 
 Ask for passwords interactively.
 
-=item C<--checksum=cksum4>
+=item C<--checksum=cksum8>
 
 Checksum function to be used. The quality of this function in term
 of bit-spreading and uniformity is important for the quality of the
@@ -88,6 +88,12 @@ Name prefix for comparison tables. May be schema-qualified.
 
 Separator string when concatenating columns.
 
+=item C<--show-all-keys --noshow-all-keys>
+
+Show all differing keys, even if big chunks of INSERT and DELETE are detected. 
+This should not happend under the "few" differences assumption and with k<<f.
+Default is not to show all keys.
+
 =item C<--source='DBI:Pg:dbname=%b;host=%h;port=%p;'>
 
 DBI source template. Changing this might allow to use this command 
@@ -105,21 +111,15 @@ to be deleted by hand.
 
 Be verbose about what is happening. The more you ask, the more verbose.
 
-=item C<--show-all-keys --noshow-all-keys>
-
-Show all differing keys, even if big chunks of INSERT and DELETE are detected. 
-This should not happend under the "few" differences assumption and with k<<f.
-Default is not to show all keys.
-
 =back
 
 =head1 ARGUMENTS
 
-The two arguments describe database connections with the following syntax,
-where square brackets denote optional parts. Although all parts
-are optional, the arguments must not be empty.
+The two arguments describe database connections with the following URL-like
+syntax, where square brackets denote optional parts. Although all parts
+are optional, the arguments must not be empty!
 
-  [login[:pass]@][host[:port]][[/base]/[schema.]table[?[key:]cols]]
+  [db:][login[:pass]@][host[:port]][[/base]/[schema.]table[?[key:]cols]]
 
 =over 4
 
@@ -190,9 +190,9 @@ help in such cases.
 
 In very rare cases, the output gives an idc instead of a key. This
 is because there are so many differences that the summary of one group
-appears to be empty... Consider option B<--show-all-keys> to 
-display all offending keys instead, but be warn that the result 
-will be large.
+appears to be empty on one side... Consider option B<--show-all-keys> 
+and B<--max> to display all offending keys instead, but be warn that 
+the result will be large.
 
 =head1 DEPENDENCES
 
@@ -218,7 +218,7 @@ Three suitable implementations are available for PostgreSQL and can be loaded
 into the server by processing C<share/contrib/checksum.sql>.
 The three functions C<cksum2>, C<cksum4> and C<cksum8> differ on the size
 of the resulting checksum expressed in bytes. The default is to use
-the C<cksum4> version.
+the C<cksum8> version.
 
 =item 3
 
@@ -501,13 +501,23 @@ Reporting bugs is good practice, so tell me if you find one.
 
 =head1 VERSIONS
 
-See L<http://www.coelho.net/pg_comparator/> for the latest version.
+See L<http://pgfoundry.org/projects/pg-comparator/> for the latest
+version. My personnal site for the tool is 
+L<http://www.coelho.net/pg_comparator/>.
 
 =over 4
 
+=item B<version 1.3> 31/08/2004
+
+Project moved to L<http://pgfoundry.org/>.
+
+Use cksum8 checksum function by default.
+
+Minor doc updates.
+
 =item B<version 1.2> 27/08/2004
 
-Added B<--show-all-keys> option for handling big chunks or deletes
+Added B<--show-all-keys> option for handling big chunks of deletes
 or inserts.
 
 =item B<version 1.1> 26/08/2004
@@ -545,7 +555,7 @@ use DBI;
 
 # various option defaults
 my ($factor, $temp, $ask_pass, $verb, $max_report) = (128, 1, 0, 0, 32);
-my ($cksum, $agg, $prefix, $sep) = ('cksum4', 'xor', 'cmp', ':');
+my ($cksum, $agg, $prefix, $sep) = ('cksum8', 'xor', 'cmp', ':');
 my $source = 'DBI:Pg:dbname=%b;host=%h;port=%p;';
 my $null = "null_string(%s,'null')";
 my $show_all_keys = 0;
@@ -571,7 +581,8 @@ sub parse_conn($)
     my ($user,$pass,$host,$port,$base,$tabl,$keys,$cols) = # set defaults
 	($ENV{USER}, '', 'localhost', 5432, $ENV{USER}, '', '', '');
 
-    # pretty rough...
+    # parser is pretty rough...
+    $c =~ s/^db:(pg:)?//; # ignore start of url tag
     ($user, $pass) = ($1, $3) if $c =~ s/^([\w]+)(:([^\@]*))?\@//i;
     ($host, $port) = ($1, $3) if $c =~ s/^([\w]+)(:(\d+))?//i;
     ($base, $tabl) = ($2, $3) if $c =~ s,^/(\w+)/([\w.]+),,i;
@@ -643,15 +654,15 @@ sub compute_cheksum($$$$$)
 # globals: $verb $temp $agg
 sub compute_summaries($$@)
 {
-    my ($dbh,$name,@modules) = @_;
+    my ($dbh,$name,@mods) = @_;
     # compute cascade of summary tables
-    for my $level (1 .. @modules-1) {
-	print "building summary table ${name}$level ($modules[$level])\n" 
+    for my $level (1 .. @mods-1) {
+	print "building summary table ${name}$level ($mods[$level])\n" 
 	    if $verb>1;
 	$dbh->do("CREATE $temp TABLE ${name}${level} AS " .
-		 "SELECT MOD(idc,$modules[$level]) AS idc, $agg(cks) AS cks " .
+		 "SELECT MOD(idc,$mods[$level]) AS idc, $agg(cks) AS cks " .
 		 "FROM ${name}" . ($level-1) . " " .
-		 "GROUP BY MOD(idc,$modules[$level])");
+		 "GROUP BY MOD(idc,$mods[$level])");
     }
 }
 
@@ -669,22 +680,19 @@ sub selidc($$$$@)
     return $sth;
 }
 
+# investigate an "idc/module" list to show corresponding keys.
 # show_all_keys($dbh, $table, $nature, @idc_mods)
 # globals: $verb
 sub show_all_keys($$$@)
 {
     my ($dbh,$table,$nature,@idc_mods) = @_;
-    my $cond = '';
+    return unless @idc_mods; # bye if nothing to investigate
+    my $cond = ''; # select query condition. must not be empty.
     print "# investigating $nature chunks\n" if $verb;
-    
-    for my $idc_mod (@idc_mods)
-    {
+    for my $idc_mod (@idc_mods) {
 	my ($idc,$module) = split '/', $idc_mod;
-	if ($cond) {
-	    $cond .= " OR MOD(idc,$module)=$idc";
-	} else {
-	    $cond = "MOD(idc,$module)=$idc";
-	}
+	$cond .= ' OR ' if $cond;
+	$cond .= "MOD(idc,$module)=$idc";
     }
     my $sth = $dbh->prepare("SELECT id FROM $table WHERE $cond ORDER BY id");
     $sth->execute();
@@ -799,7 +807,7 @@ GetOptions("manual|man|m" => sub { usage(2, 0, ''); },
 # fix --temp or --notemp option
 $temp = $temp? 'TEMPORARY': '';
 
-# factor MUST BE a power of 2 (easier to look for them)
+# factor MUST BE a power of 2
 $factor = 2**int(log($factor)/log(2));
 $factor = 2 if $factor<2;
 
