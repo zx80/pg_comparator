@@ -1,4 +1,4 @@
--- $Id: xor_aggregate.sql 163 2004-08-25 08:20:27Z coelho $
+-- $Id: xor_aggregate.sql 247 2005-03-13 09:31:52Z coelho $
 
 -- default behavior for strict functions used: NULLs are ignored...
 

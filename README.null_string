@@ -1,9 +1,0 @@
-provide null_string handling function.
-
-load with:
-
-	sh> psql < <path-to-postgresql>/share/contrib/null_string.sql
-
-use as:
-
-	psql> SELECT null_string(column_name, 'replacement if null') FROM ...;

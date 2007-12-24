@@ -1,0 +1,14 @@
+* general
+- rename pg_table_sync or pg_sync if available?
+- optimality?
+- check DBD::Pg options...
+
+* options and improvements
+- generate SQL statement for syncing?
+- update -> delete/insert
+- skip the size count() somehow?
+- use transactions? locks?
+- use md5 instead of custom checksum function?
+- use integer primary key without hashing?
+- try create + insert from select if count directly available?
+- what to count: select vs create vs drop?

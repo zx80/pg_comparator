@@ -1,15 +1,15 @@
 Postgresql 8.0 or better:
 
-Simply use the pgxs makefile provided:
+Simply use the pgxs GNU makefile provided:
 
-	sh> gmake install
+	sh> make install
 
 You must only insure that the pg_config found in your path is the one
 of the target postgresql server.
 
 If you are fed up, you can remove all installed files with:
 
-	sh> gmake uninstall
+	sh> make uninstall
 
 
 
@@ -23,5 +23,5 @@ the stuff where expected.
 Alternativelly, you can copy all files in a contrib/pg_comparator directory
 within the PostgreSQL source tree, fix the makefile by looking at other
 contrib makefiles for defining proper macros and including some files, 
-and then gmake install/uninstall as above after PostgreSQL has been 
+and then make install/uninstall as above after PostgreSQL has been 
 properly configured.
