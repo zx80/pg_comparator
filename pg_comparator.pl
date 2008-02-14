@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 411 2007-12-24 13:45:27Z fabien $
+# $Id: pg_comparator.pl 417 2008-02-14 14:49:48Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -526,7 +526,11 @@ L<http://www.coelho.net/pg_comparator/>.
 
 =over 4
 
-=item B<version dev $Revision: 411 $>
+=item B<version 1.4.1> 14/02/2008
+
+Minor fix for 8.3 by Roberto C. Sánchez. 
+
+=item B<version 1.4> 24/12/2007
 
 Port for 8.2. Better documentation. Fix masq bug: although the returned answer
 was correct, the table folding was not. DELETE/INSERT messages exchanged so as

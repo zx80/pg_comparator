@@ -1,4 +1,4 @@
-/* $Id: casts.c 351 2007-05-15 09:55:38Z fabien $
+/* $Id: casts.c 416 2008-02-14 14:45:09Z fabien $
  *
  * some missing cast functions.
  */
@@ -46,7 +46,7 @@ Datum varbitfrombytea(PG_FUNCTION_ARGS)
 
   len = VARBITTOTALLEN(resbitlen);
   result = (VarBit *) palloc(len);
-  VARATT_SIZEP(result) = len;
+  SET_VARSIZE(result, len);
   VARBITLEN(result) = resbitlen;
   memcpy(VARBITS(result), VARDATA(arg), needlen);
   if (resdatalen > needlen)
@@ -79,7 +79,7 @@ Datum varbittobytea(PG_FUNCTION_ARGS)
 		    bitlen)));
 
   result = (bytea *) palloc(len);
-  VARATT_SIZEP(result) = len;
+  SET_VARSIZE(result, len);
   memcpy(VARDATA(result), VARBITS(arg), datalen);
   
   PG_RETURN_BYTEA_P(result);
