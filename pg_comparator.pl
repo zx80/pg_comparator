@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 417 2008-02-14 14:49:48Z fabien $
+# $Id: pg_comparator.pl 421 2008-02-17 09:48:09Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -526,9 +526,13 @@ L<http://www.coelho.net/pg_comparator/>.
 
 =over 4
 
+=item B<version 1.4.2> 17/02/2008
+
+Minor makefile fix asked for by Roberto C. Sanchez. 
+
 =item B<version 1.4.1> 14/02/2008
 
-Minor fix for 8.3 by Roberto C. Sánchez. 
+Minor fix for 8.3 by Roberto C. Sanchez. 
 
 =item B<version 1.4> 24/12/2007
 

@@ -1,4 +1,4 @@
-# $Id: Makefile 417 2008-02-14 14:49:48Z fabien $
+# $Id: Makefile 421 2008-02-17 09:48:09Z fabien $
 
 name		= pg_comparator
 
@@ -22,8 +22,9 @@ $(name).html: $(name); pod2html $< > $@
 
 # distribution
 dir		= $(name)
-VERSION		= 1.4.1
-dist_files 	= *.in *.c $(DOCS) $(DATA) $(name) INSTALL LICENSE Makefile
+VERSION		= 1.4.2
+dist_files 	= *.in *.c $(DOCS) $(DATA) \
+	$(name) $(name.pl) INSTALL LICENSE Makefile
 
 tar: $(name)-$(VERSION).tgz
 
