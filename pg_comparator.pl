@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 421 2008-02-17 09:48:09Z fabien $
+# $Id: pg_comparator.pl 424 2008-02-17 10:02:16Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -525,6 +525,10 @@ version. My personnal site for the tool is
 L<http://www.coelho.net/pg_comparator/>.
 
 =over 4
+
+=item B<version 1.4.3> 17/02/2008
+
+Grumble! wrong tar pushed out.
 
 =item B<version 1.4.2> 17/02/2008
 
