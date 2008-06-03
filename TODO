@@ -1,3 +1,7 @@
+* bugs
+- fix the parse connection
+- provide meaningful examples in the documentation
+
 * general
 - rename pg_table_sync or pg_sync if available?
 - optimality?

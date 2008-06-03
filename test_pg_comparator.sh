@@ -1,10 +1,11 @@
 #! /bin/bash
-# $Id: test_pg_comparator.sh 375 2007-05-22 06:12:26Z fabien $
+# $Id: test_pg_comparator.sh 429 2008-05-23 15:27:45Z fabien $
 
 rows=1000001
 name=foo
 seed=1
 width=5
+base=$USER
 
 while getopts "s:r:n:w:" opt
 do
@@ -56,12 +57,13 @@ echo "BUILD size=$rows name=$name seed=$seed width=$width $(date)"
     echo "COMMIT;"
     echo "ANALYZE ${name}1;"
     echo "ANALYZE ${name}2;"
-} | psql
+} | psql $base
 
 [ "$1" = 'load' ] && exit
 
 echo "COMPARE $(date)"
-time pg_comparator "$@" /${name}1?id:c1,c2 /${name}2?id:c3,c4
+echo pg_comparator "$@" /${base}/${name}1?id:c1,c2 /${base}/${name}2?id:c3,c4
+time pg_comparator "$@" /${base}/${name}1?id:c1,c2 /${base}/${name}2?id:c3,c4
 
 echo "EXPECTING 4 updates, 1 insert, 1 delete"
 echo "CLEAN $(date)"

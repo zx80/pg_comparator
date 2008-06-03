@@ -1,8 +1,8 @@
-# $Id: Makefile 424 2008-02-17 10:02:16Z fabien $
+# $Id: Makefile 434 2008-06-03 12:56:07Z fabien $
 
 name		= pg_comparator
 
-SCRIPTS_built	= $(name)
+SCRIPTS		= $(name)
 MODULES		= checksum casts
 DATA_built	= checksum.sql casts.sql
 DATA		= xor_aggregate.sql
@@ -12,26 +12,14 @@ DOCS		= README.$(name) \
 
 EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp
 
+# get postgresql extension infrastructure
 PGXS	= $(shell pg_config --pgxs)
 include $(PGXS)
 
-# derived documentations
-$(name): $(name).pl; cp $< $@
+# derive documentation
 $(name).1: $(name); pod2man $< > $@
 $(name).html: $(name); pod2html $< > $@
 
-# distribution
-dir		= $(name)
-VERSION		= 1.4.3
-dist_files 	= *.in *.c $(DOCS) $(DATA) $(name).pl INSTALL LICENSE Makefile
-
-tar: $(name)-$(VERSION).tgz
-
-script: $(name)
-
-$(name)-$(VERSION).tgz: script
-	cd .. ; \
-	tar czf $(name)-$(VERSION).tgz $(addprefix $(dir)/, $(dist_files))
-
-clean: local-clean
-local-clean:; $(RM) *~
+# development stuff is ignored by the distribution
+dev.mk:; touch $@
+include dev.mk

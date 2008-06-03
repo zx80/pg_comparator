@@ -1,10 +1,10 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 424 2008-02-17 10:02:16Z fabien $
+# $Id: pg_comparator.pl 438 2008-06-03 13:01:51Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
-# HELP 3: read pod stuff bellow with your favorite viewer
+# HELP 3: read pod stuff bellow with your favorite text viewer
 #
 
 =head1 NAME
@@ -138,6 +138,10 @@ Show various statistics.
 
 Be verbose about what is happening. The more you ask, the more verbose.
 
+=item C<--version>
+
+Show version information.
+
 =item C<--where=...>
 
 SQL boolean condition for partial comparison.
@@ -147,10 +151,10 @@ SQL boolean condition for partial comparison.
 =head1 ARGUMENTS
 
 The two arguments describe database connections with the following URL-like
-syntax, where square brackets denote optional parts. Although all parts
-are optional, the arguments must not be empty!
+syntax, where square brackets denote optional parts. Many parts are optional
+with a default.
 
-  [login[:pass]@][host[:port]]/base/[schema.]table[?[key:]cols]
+  [login[:pass]@][host[:port]]/base/[schema.]table[?key:cols]
 
 =over 4
 
@@ -280,15 +284,15 @@ C<Pod::Usage> for doc self-extraction (--man --opt --help).
 
 =head1 EXAMPLES
 
-Compare tables calvin and hobbes in default database on localhost, 
+Compare tables calvin and hobbes in database family on localhost, 
 with key I<id> and columns I<c1> and I<c2>:
 
-    ./pg_comparator /calvin?id:c1,c2 /hobbes
+    ./pg_comparator /family/calvin?id:c1,c2 /family/hobbes
 
 Compare tables calvin in default database on localhost and the same
 table in default database on sablons, with key I<id> and column I<data>:
 
-    ./pg_comparator localhost/calvin?id:data sablons
+    ./pg_comparator localhost/family/calvin?id:data sablons/family/calvin
 
 =head1 ALGORITHM
 
@@ -526,6 +530,10 @@ L<http://www.coelho.net/pg_comparator/>.
 
 =over 4
 
+=item B<version 1.4.4> 03/06/2008
+
+Manual connection string parsing.
+
 =item B<version 1.4.3> 17/02/2008
 
 Grumble! wrong tar pushed out.
@@ -574,7 +582,7 @@ Initial revision.
 
 =head1 COPYRIGHT
 
-Copyright (c) 2004-2007, Fabien Coelho <fabien at coelho dot net>
+Copyright (c) 2004-2008, Fabien Coelho <fabien at coelho dot net>
 http://www.coelho.net/
 
 This softwere is distributed under the terms of the BSD Licence. 
@@ -591,6 +599,8 @@ saying so (see my webpage for current address).
 use strict; # I don't like perl;-)
 use Getopt::Long;
 use DBI;
+
+my $script_version = '@VERSION@';
 
 # various option defaults
 my ($factor, $temp, $ask_pass, $verb, $max_report, $max_levels) = 
@@ -623,16 +633,37 @@ sub parse_conn($)
     my ($user, $pass, $host, $port, $base, $tabl, $keys, $cols) = # defaults
 	($ENV{USER}, '', 'localhost', 5432, undef, undef, undef, undef);
 
-    use URI;
-    # http is rather artificial here
-    my $uri = new URI("http://$c") or die "parse error on '$c'"; 
-    $host = $uri->host if $uri->host;
-    $port = $uri->port if $uri->port;
-    ($user,$pass) = split /:/, $uri->userinfo if $uri->userinfo;
-    $pass = '' unless defined $pass;
-    ($base,$tabl) = ($uri->path_segments)[1,2];
-    ($keys, $cols) = split /:/, $uri->query;
+    # split authority and path
+    die "invalid connection string '$c', must contain '\/'\n"
+	unless $c =~ /^([^\/]*)(\/.*)/;
 
+    my ($auth,$path) = ($1, $2);
+    print "auth=$auth path=$path\n";
+
+    if ( "$auth" )
+    {
+	# parse authority if non empty
+	die "invalid authority string '$auth'\n"
+	    unless $auth =~ /^((\w+)(:(\w*))?@)?([^:]+)(:(\d+))?$/;
+	
+	$user=$2 if "$1"; 
+	$pass=$4 if "$3"; 
+	$host=$5;
+	$port=$7 if "$6";
+	print STDERR "user=$user, pass=$pass, host=$host, port=$port\n" 
+	    if $verb>2;
+    }
+
+    # parse path
+    die "invalid path string '$path'\n"
+	unless $path =~ /^\/(\w+)\/((\w+\.)?\w+)(\?([\w\,]+)\:([\w\,]+))?$/;
+
+    $base=$1;
+    $tabl=$2;
+    $keys=$5, $cols=$6 if "$4";
+    print STDERR "base=$base, tabl=$tabl, keys=$keys, cols=$cols\n" if $verb>2;
+
+    #
     my @res = ($user,$pass,$host,$port,$base,$tabl,$keys,$cols);
     die "unexpected connection string: @res" 
 	unless defined $base and defined $tabl and 
@@ -906,7 +937,9 @@ GetOptions("manual|man|m" => sub { usage(2, 0, ''); },
 	   "threads!" => \$threads,
 	   "statistics|stats!" => \$stats,
 	   "assume-size|as=i" => \$skip,
-	   "ask-pass|ap!" => \$ask_pass) or die "$! (try $0 --help)";
+	   "ask-pass|ap!" => \$ask_pass,
+           "version" => sub { print "$0 version is $script_version\n"; })
+	   or die "$! (try $0 --help)";
 
 # fix source2
 $source2 = $source unless defined $source2;
