@@ -1,16 +1,16 @@
 #! /usr/bin/perl -w
-# 
-# $Id: rand_table.pl 383 2007-05-23 19:47:26Z fabien $
+#
+# $Id: rand_table.pl 502 2010-03-20 21:28:51Z fabien $
 #
 # generates a sample table
 #
 
 use strict;
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 
 my $table = 'foo';
-my $seed = '';
 my $rows = 1000;
+my @keys = ();
 my @columns = ();
 my $width = 5;
 my $key = 0;
@@ -18,10 +18,11 @@ my $create = 1;
 
 GetOptions
   ("table|t=s" => \$table,
-   "seed|s=i" => \$seed,
+   "seed|s=i" => sub { srand($_[1]); },
    "rows|r=i" => \$rows,
    "create|e!" => \$create,
-   "columns|c=s" => \@columns,
+   "key|K=s" => \@keys,
+   "columns|c:s" => \@columns,
    "width|w=i" => \$width,
    "start-key|start|sk|k=i" => \$key,
    "help|h" => sub {
@@ -30,23 +31,22 @@ GetOptions
    })
     or die $!;
 
-# fix options
-@columns = split /,/, join ',', @columns;
-@columns = ('data') unless @columns;
-srand($seed) if $seed;
+# fix columns options
+@keys = split ',', join ',', @keys;
+@columns = split ',', join ',', @columns;
 
 # declare table
 if ($create)
 {
-    print "CREATE TABLE $table (id INTEGER PRIMARY KEY";
-    for my $c (@columns) {
-	print ", $c TEXT";
-    }
-    print ");\n";
+  print "CREATE TABLE $table(\n  id INTEGER";
+  for my $c (@keys, @columns) {
+    print ",\n  $c TEXT";
+  }
+  print ",\n  PRIMARY KEY (", join(',','id',@keys),  ")\n);\n";
 }
 
 # fill table
-print "COPY $table(id,", join(',', @columns), ") FROM STDIN;\n";
+print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n";
 
 sub ran($)
 {
@@ -61,7 +61,7 @@ sub ran($)
 my $i = 0;
 while ($i++<$rows) {
     print $key+$i;
-    for my $c (@columns) {
+    for my $c (@keys, @columns) {
 	print "\t", ran($width);
     }
     print "\n";

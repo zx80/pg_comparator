@@ -1,6 +1,6 @@
 * bugs
-- fix the parse connection
 - provide meaningful examples in the documentation
+- test with composite key?
 
 * general
 - rename pg_table_sync or pg_sync if available?
@@ -16,3 +16,7 @@
 - use integer primary key without hashing?
 - try create + insert from select if count directly available?
 - what to count: select vs create vs drop?
+- allow functions? e.g. lower(col1), trim(col2)...
+
+* pointers
+- http://www.sql-server-performance.com/articles/dba/database_comparison_sp_p1.aspx

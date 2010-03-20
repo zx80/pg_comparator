@@ -1,58 +1,114 @@
 #! /bin/bash
-# $Id: test_pg_comparator.sh 429 2008-05-23 15:27:45Z fabien $
+#
+# $Id: test_pg_comparator.sh 503 2010-03-20 21:29:03Z fabien $
+#
+# ./test_pg_comparator.sh -r 100 \
+#    -a fabien:mypassword@localhost -- \
+#    --synchronize --stats --do-it
 
-rows=1000001
-name=foo
-seed=1
-width=5
-base=$USER
+PATH=$PATH:.
 
-while getopts "s:r:n:w:" opt
+# default values
+rows=1001 name=foo seed=1 width=5 ncol=2 base=$USER auth= keep=
+
+# default diffs
+upt=2 ins=2 del=2 nul=2 rev=1
+
+while getopts "s:r:n:w:a:b:c:u:i:d:l:v:kh" opt
 do
   case $opt in
-      s) seed=$OPTARG ;;
-      n) name=$OPTARG ;;
-      r) rows=$OPTARG ;;
-      w) width=$OPTARG ;; # about 17 chars per w
-      *) 
-	  echo "usage: $0 [-s seed] [-n name] [-r rows] [-w width] args..."; 
-	  exit 1
-	  ;;
+    # connection
+    a) auth=$OPTARG ;;
+    b) base=$OPTARG ;;
+    n) name=$OPTARG ;;
+    # data generation
+    s) seed=$OPTARG ;;
+    r) rows=$OPTARG ;;
+    c) ncol=$OPTARG ;;
+    w) width=$OPTARG ;; # about 17 chars per w
+    # diffs
+    u) upt=$OPTARG ;;
+    i) ins=$OPTARG ;;
+    d) del=$OPTARG ;;
+    l) nul=$OPTARG ;;
+    v) rev=$OPTARG ;;
+    # cleanup
+    k) keep=1 ;;
+    # help
+    h|*)
+      echo -e \
+	"usage: $0 [options] [-- pg-comparator-options...]\n" \
+	" -s seed: random generator seed\n" \
+	" -n name: table prefix\n" \
+	" -r rows: vertical size\n" \
+	" -w width: horizontal size (17 chars per unit)\n" \
+	" -a auth: authority part in the test url\n" \
+        " -k: keep resulting table"
+      exit 1
+      ;;
   esac
 done
 
 shift $(( $OPTIND - 1 ))
 
+# fix
+[ $ncol -eq 0 ] && upt=0 rev=0 nul=0
+
+total=$(($upt+$ins+$del+$nul+$rev))
+
+msg="u=$upt i=$ins d=$del n=$nul r=$rev: "
+msg+="$ins INSERT, $del DELETE, $(($upt+$nul+2*$rev)) UPDATE"
+
+# build column names
+col1= col2=
+if [ $ncol -gt 0 ] ; then
+  let i=$ncol
+  while [ $i -gt 0 ] ; do
+    let i--
+    col1+=",a$i"
+    col2+=",b$i"
+  done
+fi
+col1=${col1#,}
+col2=${col2#,}
+
 echo "BUILD size=$rows name=$name seed=$seed width=$width $(date)"
 
-{ 
+{
     # create and fill tables
     echo "DROP TABLE ${name}1,${name}2;"
     rand_table.pl --table ${name}1 --seed $seed --rows $rows \
-	--columns=c1,c2 --width $width
+	--columns=$col1 --width $width
     rand_table.pl --table ${name}2 --seed $seed --rows $rows \
-	--columns=c3,c4 --width $width
+	--columns=$col2 --width $width
 
     echo "BEGIN;"
 
-    # simple update
-    echo "UPDATE ${name}1 SET c1='bouh' WHERE id=$(($rows/8));"
-
-    # null different update...
-    echo "UPDATE ${name}1 SET c2=NULL WHERE id=$(($rows*2/3));"
-    echo "UPDATE ${name}2 SET c3=NULL WHERE id=$(($rows*2/3));"
-
-    # exchange values in same idc? uneasy to test...
-    idx=$(($rows/5)) idy=$(($idx+1))
-    echo "UPDATE ${name}2 SET id=0 WHERE id=$idx;"
-    echo "UPDATE ${name}2 SET id=$idx WHERE id=$idy;"
-    echo "UPDATE ${name}2 SET id=$idy WHERE id=0;"
-
-    # delete
-    echo "DELETE FROM ${name}1 WHERE id=$(($rows/3));"
-
-    # insert
-    echo "DELETE FROM ${name}2 WHERE id=$(($rows*9/11));"
+    i=1 div=$(($total+1))
+    while [ $i -le $total ]
+    do
+      id=$(($rows*$i/$div))
+      if [[ $upt -ne 0 ]] ; then
+	let upt--
+	echo "UPDATE ${name}1 SET a0='bouh' WHERE id=$id;"
+      elif [[ $ins -ne 0 ]] ; then
+	let ins--
+	echo "DELETE FROM ${name}2 WHERE id=$id;"
+      elif [[ $del -ne 0 ]] ; then
+	let del--
+	echo "DELETE FROM ${name}1 WHERE id=$id;"
+      elif [[ $nul -ne 0 ]] ; then
+	let nul--
+	echo "UPDATE ${name}1 SET a0=NULL WHERE id=$id;"
+      elif [[ $rev -ne 0 ]] ; then
+	let rev--
+	id2=$(($id + 1))
+	echo "UPDATE ${name}1 SET id=0 WHERE id=$id;"
+	echo "UPDATE ${name}1 SET id=$id WHERE id=$id2;"
+	echo "UPDATE ${name}1 SET id=$id2 WHERE id=0;"
+      fi
+      let i++
+    done
 
     echo "COMMIT;"
     echo "ANALYZE ${name}1;"
@@ -62,11 +118,17 @@ echo "BUILD size=$rows name=$name seed=$seed width=$width $(date)"
 [ "$1" = 'load' ] && exit
 
 echo "COMPARE $(date)"
-echo pg_comparator "$@" /${base}/${name}1?id:c1,c2 /${base}/${name}2?id:c3,c4
-time pg_comparator "$@" /${base}/${name}1?id:c1,c2 /${base}/${name}2?id:c3,c4
+echo pg_comparator "$@" \
+  $auth/${base}/${name}1?id:$col1 /${base}/${name}2?id:$col2
+time pg_comparator "$@" \
+  $auth/${base}/${name}1?id:$col1 /${base}/${name}2?id:$col2
 
-echo "EXPECTING 4 updates, 1 insert, 1 delete"
-echo "CLEAN $(date)"
-echo "DROP TABLE ${name}1, ${name}2;" | psql
+echo "EXPECTING $msg"
+
+[ "$keep" ] ||
+{
+  echo "CLEAN $(date)"
+  echo "DROP TABLE ${name}1, ${name}2;" | psql
+}
 
 echo "DONE $(date)"
