@@ -8,11 +8,11 @@
 - check DBD::Pg options...
 
 * options and improvements
-- generate SQL statement for syncing?
 - update -> delete/insert
 - skip the size count() somehow?
 - use transactions? locks?
-- use md5 instead of custom checksum function?
+- use crypto hash instead of custom checksum function?
+- use h(h(c1)||h(c2)) instead of h(c1||c2)
 - use integer primary key without hashing?
 - try create + insert from select if count directly available?
 - what to count: select vs create vs drop?

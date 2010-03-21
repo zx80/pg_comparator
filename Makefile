@@ -1,4 +1,4 @@
-# $Id: Makefile 475 2010-03-19 09:30:08Z fabien $
+# $Id: Makefile 512 2010-03-20 22:47:26Z fabien $
 
 name		= pg_comparator
 
@@ -18,8 +18,8 @@ PGXS	:= $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 
 # derive documentation
-$(name).1: $(name); pod2man $< > $@
-$(name).html: $(name); pod2html $< > $@
+$(name).1: $(name); pod2man --name $(name) $< > $@
+$(name).html: $(name); pod2html --title $(name) $< > $@
 
 # development stuff is ignored by the distribution
 -include dev.mk

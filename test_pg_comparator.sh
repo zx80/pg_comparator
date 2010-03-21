@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 503 2010-03-20 21:29:03Z fabien $
+# $Id: test_pg_comparator.sh 518 2010-03-21 10:39:01Z fabien $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost -- \
@@ -12,9 +12,9 @@ PATH=$PATH:.
 rows=1001 name=foo seed=1 width=5 ncol=2 base=$USER auth= keep=
 
 # default diffs
-upt=2 ins=2 del=2 nul=2 rev=1
+upt=2 ins=2 del=2 nul=2 rev=1 total=
 
-while getopts "s:r:n:w:a:b:c:u:i:d:l:v:kh" opt
+while getopts "s:r:n:w:a:b:c:u:i:d:l:v:t:kh" opt
 do
   case $opt in
     # connection
@@ -27,6 +27,7 @@ do
     c) ncol=$OPTARG ;;
     w) width=$OPTARG ;; # about 17 chars per w
     # diffs
+    t) total=$OPTARG ;;
     u) upt=$OPTARG ;;
     i) ins=$OPTARG ;;
     d) del=$OPTARG ;;
@@ -51,11 +52,25 @@ done
 
 shift $(( $OPTIND - 1 ))
 
-# fix
-[ $ncol -eq 0 ] && upt=0 rev=0 nul=0
+# if total is set, share upt/ins/del/nul/rev to match it
+if [ "$total" ] ; then
+  ins=$(($total/4))
+  nul=$ins
+  upt=$ins
+  rev=0
+  # fix if key only, no updates
+  [ $ncol -eq 0 ] && upt=0 rev=0 nul=0
+  del=$(($total - $ins - $upt - $rev - $nul))
+else
+  # fix if key only, no updates
+  [ $ncol -eq 0 ] && upt=0 rev=0 nul=0
+  # compute total
+  total=$(($upt+$ins+$del+$nul+$rev))
+fi
 
-total=$(($upt+$ins+$del+$nul+$rev))
+expect=$(($upt+$ins+$del+$nul+2*$rev))
 
+# result
 msg="u=$upt i=$ins d=$del n=$nul r=$rev: "
 msg+="$ins INSERT, $del DELETE, $(($upt+$nul+2*$rev)) UPDATE"
 
@@ -118,9 +133,9 @@ echo "BUILD size=$rows name=$name seed=$seed width=$width $(date)"
 [ "$1" = 'load' ] && exit
 
 echo "COMPARE $(date)"
-echo pg_comparator "$@" \
+echo pg_comparator -e $expect "$@" \
   $auth/${base}/${name}1?id:$col1 /${base}/${name}2?id:$col2
-time pg_comparator "$@" \
+time pg_comparator -e $expect "$@" \
   $auth/${base}/${name}1?id:$col1 /${base}/${name}2?id:$col2
 
 echo "EXPECTING $msg"

@@ -1,9 +1,11 @@
-# $Id: dev.mk 506 2010-03-20 21:43:46Z fabien $
+# $Id: dev.mk 522 2010-03-21 11:47:24Z fabien $
 
 # script distribution
 dir	= $(name)
 VERSION	= dev
-YEAR	= 2010
+YEAR	= $(shell date +%Y)
+DATE	= $(shell date +%F)
+REVISION= $(shell svnversion)
 
 # files to distribute
 F.c	= $(wildcard *.c)
@@ -12,7 +14,10 @@ F.dist 	= $(F.c) $(F.in) $(DOCS) $(DATA) $(name) INSTALL LICENSE Makefile
 
 # derived documentations
 $(name): $(name).pl
-	sed -e's/@VERSION@/$(VERSION)/g;s/@YEAR@/$(YEAR)/g' $< > $@
+	sed -e 's/@VERSION@/$(VERSION)/g;' \
+	    -e 's/@REVISION@/$(REVISION)/g;' \
+	    -e 's/@YEAR@/$(YEAR)/g;' \
+	    -e 's/@DATE@/$(DATE)/g' $< > $@
 	chmod +x $@
 
 %: %.src
@@ -30,15 +35,32 @@ dev-clean:
 	$(RM) $(name) *~ LICENSE
 
 # rough testing, including synchronization
-AUTH=localhost
-DB=test
-NCOLS=2
-COL1=a1,a0
-COL2=b1,b0
-CONN1=$(AUTH)/$(DB)/foo1?id:$(COL1)
-CONN2=$(AUTH)/$(DB)/foo2?id:$(COL2)
+AUTH	= localhost
+DB	= test
+ROWS	= 100
+TOTAL	= 8
+COLS	= 2
+PGCOPTS	=
 
+# generate column names
+SHELL	= /bin/bash
+numbers	:= $(shell n=$(COLS); while let n--; do echo $$n; done)
+col1	:= $(shell echo $(addprefix a,$(numbers))|tr ' ' ',')
+col2	:= $(shell echo $(addprefix b,$(numbers))|tr ' ' ',')
+
+# connextions
+CONN1	= $(AUTH)/$(DB)/foo1?id:$(col1)
+CONN2	= $(AUTH)/$(DB)/foo2?id:$(col2)
+
+# make AUTH=calvin:hobbes@home DB=calvin COLS=0 ROWS=1000 check
 check: $(name)
-	./test_pg_comparator.sh -r 100 -a $(AUTH) -b $(DB) -k -c $(NCOLS)
-	./pg_comparator -S -D $(CONN1) $(CONN2)
-	./pg_comparator $(CONN1) $(CONN2)
+	./test_pg_comparator.sh \
+		-a $(AUTH) -b $(DB) -c $(COLS) -r $(ROWS) -t $(TOTAL) -k \
+		-- $(PGCOPTS)
+	./pg_comparator -S -D -e $(TOTAL) $(PGCOPTS) $(CONN1) $(CONN2)
+	./pg_comparator -e 0 $(PGCOPTS) $(CONN1) $(CONN2)
+
+tests:
+	$(MAKE) COLS=0 check
+	$(MAKE) COLS=1 check
+	$(MAKE) COLS=2 check

@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 511 2010-03-20 22:39:08Z fabien $
+# $Id: pg_comparator.pl 525 2010-03-21 12:21:53Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -48,22 +48,28 @@ Checksum function to be used. The quality of this function in term
 of bit-spreading and uniformity is important for the quality of the
 results. A poor function might miss differences because of collisions
 or result in a more costly search. Cryptographic hash functions such as
-MD5 or SHA1 are a good choice.
+MD5 or SHA1 are a good choice, but are a little large. A reduced version of
+such functions (say a truncature to 8 bytes) would be even better.
 
 =item C<--cleanup>
 
 Drop checksum tables. Useful after C<--notemp>.
 
-=item C<--factor=7>
+=item C<--expect n> or C<-e n>
+
+Total number of differences to expect (updates, deletes and inserts),
+used for non regression tests.
+
+=item C<--folding-factor=7> or C<-f 7>
 
 Folding factor: log2 of the number of rows grouped together at each stage.
 Default chosen after some basic tests on medium-size cases.
 
-=item C<--help>
+=item C<--help> or C<-h>
 
 Show short help.
 
-=item C<--man>
+=item C<--man> or C<-m>
 
 Show manual page.
 
@@ -86,7 +92,7 @@ If you set --null='%s', null values are set as they appear,
 which might damage the results in null columns are used because
 multi-column checksums will all be 0.
 
-=item C<--option>
+=item C<--option> or C<-o>
 
 Show option summary.
 
@@ -94,13 +100,14 @@ Show option summary.
 
 Name prefix for comparison tables. May be schema-qualified.
 
-=item C<--report> C<--no-report>
+=item C<--report>, C<--no-report>
 
 Report keys as they are found. Default is to report.
 
-=item C<--separator=:>
+=item C<--separator=:> or C<-s :>
 
-Separator string when concatenating columns.
+Separator string or character when concatenating key columns.
+This character should not appear in the values.
 
 =item C<--source='DBI:Pg:dbname=%b;host=%h;port=%p;'>
 
@@ -125,19 +132,20 @@ Whether to use temporary tables. Default is to use.
 If you don't, the tables are kept at the end, so they will have
 to be deleted by hand.
 
-=item C<--threads>
+=item C<--threads> or C<-T>
 
 Use threads: a synonymous for "segmentation fault":-)
 It seems that DBI or DBD::Pg does not like threads at all...
+See bug report L<http://rt.cpan.org/Public/Bug/Display.html?id=55755>.
 
 =item C<--stats>
 
 Show various statistics.
 
-=item C<--synchronize>
+=item C<--synchronize> or C<-S>
 
 Actually perform operations to synchronize the second table wrt the first.
-Well, not really. It is only done if you add C<--do-it>.
+Well, not really. It is only done if you add C<--do-it> or C<-D>.
 Save your data before attempting anything like that!
 
 =item C<--verbose>
@@ -553,15 +561,23 @@ For instance, it does not check that the declared key is indeed a key.
 Do not attempt to synchronize while the table is being used!
 Maybe I should lock the table?
 
+Although the algorithm can work with some normalized columns
+(say strings are trimmed, lowercased, unicode normalization...),
+the implementation may not work at all.
+
 =head1 VERSIONS
 
 See L<http://pgfoundry.org/projects/pg-comparator/> for the latest
-version. My personnal site for the tool is
-L<http://www.coelho.net/pg_comparator/>.
+version. My site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =over 4
 
-=item B<version 1.5.0> 20/03/2010
+=item B<version @VERSION@> @DATE@ (r@REVISION@)
+
+More documentation.
+Add C<--expect> option for non regression tests.
+
+=item B<version 1.5.0> 2010-03-20 (r511)
 
 Add more links.
 Fix so that with a key only (i.e. without additional columns), although
@@ -569,40 +585,40 @@ it could be optimized further in this case.
 Integrate patch by I<Erik Aronesty>: More friendly "connection parsor".
 Add synchronization option to actually synchronize the data.
 
-=item B<version 1.4.4> 03/06/2008
+=item B<version 1.4.4> 2008-06-03 (r438)
 
 Manual connection string parsing.
 
-=item B<version 1.4.3> 17/02/2008
+=item B<version 1.4.3> 2008-02-17 (r424)
 
 Grumble! wrong tar pushed out.
 
-=item B<version 1.4.2> 17/02/2008
+=item B<version 1.4.2> 2008-02-17 (r421)
 
 Minor makefile fix asked for by I<Roberto C. Sanchez>.
 
-=item B<version 1.4.1> 14/02/2008
+=item B<version 1.4.1> 2008-02-14 (r417)
 
 Minor fix for 8.3 by I<Roberto C. Sanchez>.
 
-=item B<version 1.4> 24/12/2007
+=item B<version 1.4> 2007-12-24 (r411)
 
 Port for 8.2. Better documentation. Fix masq bug: although the returned answer
 was correct, the table folding was not. DELETE/INSERT messages exchanged so as
 to match a 'sync' or 'copy' semantics, as suggested by I<Erik Aronesty>.
 
-=item B<version 1.3> 31/08/2004
+=item B<version 1.3> 2004-08-31 (r239)
 
 Project moved to L<http://pgfoundry.org/>.
 Use cksum8 checksum function by default.
 Minor doc updates.
 
-=item B<version 1.2> 27/08/2004
+=item B<version 1.2> 2004-08-27 (r220)
 
 Added B<--show-all-keys> option for handling big chunks of deletes
 or inserts.
 
-=item B<version 1.1> 26/08/2004
+=item B<version 1.1> 2004-08-26 (r210)
 
 Fix algorithmic bug: checksums B<must> also include the key,
 otherwise exchanged data could be not detected if the keys were
@@ -613,7 +629,7 @@ Thanks to I<Giuseppe Maxia> who asked for it.
 
 Various code cleanups.
 
-=item B<version 1.0> 25/08/2004
+=item B<version 1.0> 2004-08-25  (r190)
 
 Initial revision.
 
@@ -639,7 +655,7 @@ use strict; # I don't like perl;-)
 use Getopt::Long qw(:config no_ignore_case);
 use DBI;
 
-my $script_version = '@VERSION@';
+my $script_version = '@VERSION@ (r@REVISION@)';
 
 # various option defaults
 my ($factor, $temp, $ask_pass, $verb, $max_report, $max_levels) =
@@ -650,6 +666,7 @@ my ($source2, $where);
 my ($cksum, $null) = ("CKSUM8(%s)", "COALESCE(%s::TEXT,'null')");
 my ($report, $threads, $cleanup, $stats, $skip) = (1, 0, 0, 0, 0);
 my ($synchronize, $do_it) = (0, 0);
+my $expect = undef;
 
 # self extracting help
 # usage(verbosity, exit value, message)
@@ -975,7 +992,8 @@ GetOptions("manual|man|m" => sub { usage(2, 0, ''); },
 	   "checksum-function|cksum|cf|c=s" => \$cksum,
 	   "cleanup!" => \$cleanup,
 	   "aggregate-function|af|a=s" => \$agg,
-	   "factor|f=i" => \$factor,
+	   "expect|e=i" => \$expect,
+	   "folding-factor|factor|f=i" => \$factor,
 	   "synchronize|sync|S!" => \$synchronize,
 	   "do-it|do|D!" => \$do_it,
 	   "maximum-report|max-report|mr|x=i" => \$max_report,
@@ -988,7 +1006,7 @@ GetOptions("manual|man|m" => sub { usage(2, 0, ''); },
 	   "source2|u2=s" => \$source2,
 	   "where|w=s" => \$where,
 	   "temporary|tmp|t!" => \$temp,
-	   "threads!" => \$threads,
+	   "threads|T!" => \$threads,
 	   "statistics|stats!" => \$stats,
 	   "assume-size|as=i" => \$skip,
 	   "ask-pass|ap!" => \$ask_pass,
@@ -1283,3 +1301,7 @@ if ($stats)
     "     bulks: ", tv_interval($tmer, $tblk), "\n",
     "   synchro: ", tv_interval($tblk, $tend), "\n";
 }
+
+# check count
+die "unexpected number of differences (got $count, expecting $expect)"
+  if defined $expect and $expect != $count;
