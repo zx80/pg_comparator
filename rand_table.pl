@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: rand_table.pl 502 2010-03-20 21:28:51Z fabien $
+# $Id: rand_table.pl 536 2010-03-21 15:53:08Z fabien $
 #
 # generates a sample table
 #
@@ -21,10 +21,10 @@ GetOptions
    "seed|s=i" => sub { srand($_[1]); },
    "rows|r=i" => \$rows,
    "create|e!" => \$create,
-   "key|K=s" => \@keys,
+   "keys|k:s" => \@keys,
    "columns|c:s" => \@columns,
    "width|w=i" => \$width,
-   "start-key|start|sk|k=i" => \$key,
+   "start-key|start|sk|K=i" => \$key,
    "help|h" => sub {
        print "$0 -t tab -s seed -r rows -c col,names -w width -k i -e\n";
        exit 0;
@@ -51,7 +51,7 @@ print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n";
 sub ran($)
 {
     my ($n) = @_;
-    my $ran = 'data:';
+    my $ran = 'data-';
     while ($n--) {
 	$ran .= rand();
     }

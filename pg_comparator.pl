@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 525 2010-03-21 12:21:53Z fabien $
+# $Id: pg_comparator.pl 564 2010-03-22 09:38:57Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -19,7 +19,8 @@ B<pg_comparator> [options as B<--help> B<--option> B<--man>] conn1 conn2
 
 This script performs a network and time efficient comparison of two
 possibly large tables on two servers. It makes only sense to use it
-if the expected differences are small.
+if the expected differences are relatively small. Optionally, it can
+synchronize the tables.
 
 The implementation is quite generic: multi-column keys, no assumption
 of data types other that they can be cast to text, subset of columns
@@ -53,17 +54,19 @@ such functions (say a truncature to 8 bytes) would be even better.
 
 =item C<--cleanup>
 
-Drop checksum tables. Useful after C<--notemp>.
+Drop checksum tables. Useful after C<--no-temp>.
 
 =item C<--expect n> or C<-e n>
 
 Total number of differences to expect (updates, deletes and inserts),
 used for non regression tests.
 
-=item C<--folding-factor=7> or C<-f 7>
+=item C<--folding-factor=8> or C<-f 8>
 
 Folding factor: log2 of the number of rows grouped together at each stage.
 Default chosen after some basic tests on medium-size cases.
+The minimum value of 1 builds a binary tree.
+Good values for large databases and low bandwidth is 10 to 12.
 
 =item C<--help> or C<-h>
 
@@ -126,7 +129,7 @@ Default is same as previous --source option.
 Assume the provided value as the table size, thus skipping the COUNT
 query.
 
-=item C<--temporary --notemporary>
+=item C<--temporary>, C<--no-temporary>
 
 Whether to use temporary tables. Default is to use.
 If you don't, the tables are kept at the end, so they will have
@@ -159,6 +162,8 @@ Show version information.
 =item C<--where=...>
 
 SQL boolean condition for partial comparison.
+Useful to reduce the load if you know that expected differences are in
+some particular parts of your data, say those timestamped today...
 
 =back
 
@@ -168,19 +173,20 @@ The two arguments describe database connections with the following URL-like
 syntax, where square brackets denote optional parts. Many parts are optional
 with a default.
 
-  [login[:pass]@][host[:port]]/base/[schema.]table[?key:cols]
+  [login[:pass]@][host[:port]]/[base/[[schema.]table[?key:cols]]]
 
 =over 4
 
 =item B<login>
 
-Login to use when connecting to database. Default is username.
+Login to use when connecting to database. Default is username for first
+connection, and same as first connection for second.
 
 =item B<pass>
 
 Password to use when connecting to database.
 Default is none for the first connection, and the same password
-as the first connection for the second if the connection targets
+as the first connection for the second I<if> the connection targets
 the same host, port and uses the same login.
 
 =item B<host>
@@ -193,21 +199,26 @@ Tcp-ip port to connect to. Default is 5432 for PostgreSQL.
 
 =item B<base>
 
-Database catalog to connect to. Default is username.
+Database catalog to connect to. Default is username for first connection.
+Default is same as first connection for second connection.
 
 =item B<schema.table>
 
 The possibly schema-qualified table to use for comparison.
-Default is same as first connection.
+No default for first connection.
+Default is same as first connection for second connection.
 
 =item B<keys>
 
-Comma-separated list of key columns. Default is same as first connection.
+Comma-separated list of key columns.
+No default for first connection.
+Default is same as first connection for second connection.
 
 =item B<cols>
 
-Comma-separated list of columns to compare. Default is same as first
-connection.
+Comma-separated list of columns to compare.
+May be empty. No default for first connection.
+Default is same as first connection for second connection.
 
 =back
 
@@ -553,6 +564,7 @@ L<http://www.webyog.com/>
 =head1 BUGS
 
 All softwares have bugs. This is a software, hence it has bugs.
+
 Reporting bugs is good practice, so tell me if you find one!
 
 The implementation does not do many sanity checks.
@@ -562,7 +574,7 @@ Do not attempt to synchronize while the table is being used!
 Maybe I should lock the table?
 
 Although the algorithm can work with some normalized columns
-(say strings are trimmed, lowercased, unicode normalization...),
+(say strings are trimmed, lowercased, unicode normalized...),
 the implementation may not work at all.
 
 =head1 VERSIONS
@@ -573,6 +585,17 @@ version. My site for the tool is L<http://www.coelho.net/pg_comparator/>.
 =over 4
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
+
+More documentation.
+Improved connection parsing with more sensible defaults.
+Make the mask computation match its above documentation with a bottom-up
+derivation, instead of a simpler top-down formula which results in bad
+performances when a power of the factor is close to the size (as pointed
+out in I<Benjamin Mead Vandiver>'s PhD).
+This bad mask computation was introduced somehow between 1.3 and 1.4 as
+an attempt at simplifying the code.
+
+=item B<version 1.5.1> 2010-03-21 (r525)
 
 More documentation.
 Add C<--expect> option for non regression tests.
@@ -599,13 +622,15 @@ Minor makefile fix asked for by I<Roberto C. Sanchez>.
 
 =item B<version 1.4.1> 2008-02-14 (r417)
 
-Minor fix for 8.3 by I<Roberto C. Sanchez>.
+Minor fix for PostgreSQL 8.3 by I<Roberto C. Sanchez>.
 
 =item B<version 1.4> 2007-12-24 (r411)
 
-Port for 8.2. Better documentation. Fix masq bug: although the returned answer
-was correct, the table folding was not. DELETE/INSERT messages exchanged so as
-to match a 'sync' or 'copy' semantics, as suggested by I<Erik Aronesty>.
+Port to PostgreSQL 8.2. Better documentation.
+Fix masq bug: although the returned answer was correct, the table folding
+was not.
+DELETE/INSERT messages exchanged so as to match a 'sync' or 'copy' semantics,
+as suggested by I<Erik Aronesty>.
 
 =item B<version 1.3> 2004-08-31 (r239)
 
@@ -658,8 +683,8 @@ use DBI;
 my $script_version = '@VERSION@ (r@REVISION@)';
 
 # various option defaults
-my ($factor, $temp, $ask_pass, $verb, $max_report, $max_levels) =
-    (7, 1, 0, 0, 1024, 0);
+my ($factor, $temp, $ask_pass, $verb, $debug, $max_report, $max_levels) =
+    (8, 1, 0, 0, 0, 1024, 0);
 my ($agg, $prefix, $sep) = ('xor', 'cmp', ':');
 my $source = 'DBI:Pg:dbname=%b;host=%h;port=%p;';
 my ($source2, $where);
@@ -689,22 +714,20 @@ sub verb($$)
 # parse a connection string... or many options instead?
 # could we directly ask for the DBI connection string?
 # ($u,$w,$h,$p,$b,$t,$k,$c) = parse_conn("connection-string")
-# globals: $ENV{USER}, $verb
+# globals: $verb
 # format: fabien:secret@host.domain.co:5432/base/schema.table?key:col,list
-# base and table are mandatory
 sub parse_conn($)
 {
   my $c = shift;
-  my ($user, $pass, $host, $port, $base, $tabl, $keys, $cols) = # defaults
-      ($ENV{USER}, '', 'localhost', 5432, undef, undef, undef, undef);
+  my ($user, $pass, $host, $port, $base, $tabl, $keys, $cols);
 
   # split authority and path
   die "invalid connection string '$c', must contain '\/'\n"
-    unless $c =~ /^([^\/]*)(\/.*)/;
+    unless $c =~ /^([^\/]*)\/(.*)/;
 
   my ($auth,$path) = ($1, $2);
 
-  if ( "$auth" )
+  if ("$auth")
   {
     # parse authority if non empty. ??? url-translation?
     die "invalid authority string '$auth'\n"
@@ -714,23 +737,26 @@ sub parse_conn($)
     $pass=$4 if defined $3;
     $host=$5;
     $port=$7 if defined $6;
-    verb 3, "user=$user, pass=$pass, host=$host, port=$port";
+    verb 3, "user=$user pass=$pass host=$host port=$port" if $debug;
   }
 
-  # parse path /base/schema.table?key,part:column,list,part
-  die "invalid path string '$path'\n"
-    unless $path =~ /^\/(\w+)\/((\w+\.)?\w+)(\?([\w\,]+)\:([\w,]*))?$/;
+  if ("$path")
+  {
+    # parse path base/schema.table?key,part:column,list,part
+    die "invalid path string '$path'\n"
+      unless $path =~ /^(\w+)?(\/((\w+\.)?\w+))?(\?([\w\,]+)(\:([\w,]*))?)?$/;
 
-  $base=$1;
-  $tabl=$2;
-  $keys=$5, $cols=$6 if defined $4;
-  verb 3, "base=$base, tabl=$tabl, keys=$keys, cols=$cols";
+    $base=$1 if defined $1;
+    $tabl=$3 if defined $2;
+    $keys=$6 if defined $5;
+    $cols=$8 if defined $7;
+
+    verb 3, "base=$base tabl=$tabl keys=$keys cols=$cols" if $debug;
+  }
 
   # return result as a list
   my @res = ($user,$pass,$host,$port,$base,$tabl,$keys,$cols);
-  die "unexpected connection string: @res"
-      unless defined $base and defined $tabl;
-  verb 2, "connection parameters: @res";
+  verb 2, "connection parameters: @res" if $debug;
   return @res;
 }
 
@@ -780,12 +806,11 @@ sub concat($)
 # inspired from mysql-table-sync implementation
 # mask is int4. could also use binary?
 # not used yet.
-sub best_int_type($)
-{
-  my ($mask) = @_;
-  return 'INT4' if $mask & ~0x0000ffff;
-  return 'INT2';
-}
+# sub best_int_type($) {
+#   my ($mask) = @_;
+#   return 'INT4' if $mask & ~0x0000ffff;
+#   return 'INT2';
+# }
 
 # global counter
 my $query_nb = 0; # number of queries
@@ -985,38 +1010,46 @@ sub differences($$$$@)
 }
 
 # option management
-GetOptions("manual|man|m" => sub { usage(2, 0, ''); },
-	   "options|option|o" => sub { usage(1, 0, ''); },
+GetOptions(# help
 	   "help|h" => sub { usage(0, 0, ''); },
+	   "options|option|o" => sub { usage(1, 0, ''); },
+	   "manual|man|m" => sub { usage(2, 0, ''); },
+	   # verbosity
 	   "verbose|v+" => \$verb,
+	   "debug|d" => \$debug,
+	   # parametrization
 	   "checksum-function|cksum|cf|c=s" => \$cksum,
-	   "cleanup!" => \$cleanup,
 	   "aggregate-function|af|a=s" => \$agg,
-	   "expect|e=i" => \$expect,
-	   "folding-factor|factor|f=i" => \$factor,
-	   "synchronize|sync|S!" => \$synchronize,
-	   "do-it|do|D!" => \$do_it,
-	   "maximum-report|max-report|mr|x=i" => \$max_report,
-	   "maximum-levels|max-levels|ml=i" => \$max_levels,
 	   "null|n=s" => \$null,
+	   "where|w=s" => \$where,
 	   "prefix|p=s" => \$prefix,
-	   "report|r!" => \$report,
 	   "separator|s=s" => \$sep,
+	   "temporary|temp|tmp|t!" => \$temp,
+	   "assume-size|as=i" => \$skip,
+	   "cleanup!" => \$cleanup,
 	   "source|u=s" => \$source,
 	   "source2|u2=s" => \$source2,
-	   "where|w=s" => \$where,
-	   "temporary|tmp|t!" => \$temp,
+	   # algorithm parameters
+	   "folding-factor|factor|f=i" => \$factor,
+	   "maximum-report|max-report|mr|x=i" => \$max_report,
+	   "maximum-levels|max-levels|ml=i" => \$max_levels,
+	   # functions
+	   "synchronize|sync|S!" => \$synchronize,
+	   "do-it|do|D!" => \$do_it,
+	   "expect|e=i" => \$expect,
+	   "report|r!" => \$report,
+	   # connection
+	   "ask-pass|ap!" => \$ask_pass,
+	   # misc
 	   "threads|T!" => \$threads,
 	   "statistics|stats!" => \$stats,
-	   "assume-size|as=i" => \$skip,
-	   "ask-pass|ap!" => \$ask_pass,
 	   "version" => sub { print "$0 version is $script_version\n"; })
 	   or die "$! (try $0 --help)";
 
 # fix source2
 $source2 = $source unless defined $source2;
 
-# fix --temp or --notemp option
+# fix --temp or --no-temp option
 $temp = $temp? 'TEMPORARY ': '';
 
 # fix factor size
@@ -1029,16 +1062,31 @@ my ($name1,$name2) = ("${prefix}_1_", "${prefix}_2_");
 # argument management
 usage(0,0,'expecting 2 arguments') unless @ARGV == 2;
 my ($u1,$w1,$h1,$p1,$b1,$t1,$k1,$c1) = parse_conn(shift);
+
+# set defaults and check minimul definitions.
+$u1 = $ENV{USER} unless defined $u1;
+$h1 = 'localhost' unless defined $h1;
+$p1 = 5432 unless defined $p1;
+
+die "no base on first connection" unless defined $b1;
+die "no table on first connection" unless defined $t1;
+die "no key on first connection" unless defined $k1;
+$c1 = '' unless defined $c1;
+
 my ($u2,$w2,$h2,$p2,$b2,$t2,$k2,$c2) = parse_conn(shift);
 
-die "no specified key in first connection" unless $k1;
-
-# fix some default values
-$t2 = $t1 unless $t1;
-$k2 = $k1 unless $k2;
-$c2 = $c1 unless $c2;
+# fix some default values for connection 2
+$u2 = $u1 unless defined $u2;
+$h2 = 'localhost' unless defined $h2;
+$p2 = 5432 unless defined $p2;
 $w2 = $w1 unless $w2 or not $w1 or $u1 ne $u2 or $h1 ne $h2 or $p1!=$p2;
+$p2 = 5432 unless defined $p2;
+$b2 = $b1 unless defined $b2;
+$t2 = $t1 unless defined $t2;
+$k2 = $k1 unless defined $k2;
+$c2 = $c1 unless defined $c2;
 
+# make list of attributes
 my @k1 = split ',', $k1;
 my @k2 = split ',', $k2;
 my @c1 = split ',', $c1;
@@ -1101,11 +1149,14 @@ else
 verb 1, "computing size and masks after folding factor...";
 $count1 = $count2 = $skip if $skip;
 my $size = $count1>$count2? $count1: $count2; # max?
-my ($mask, $i, @masks) = (0, 0);
-while ($mask<$size) {
-  $mask = (1<<($i*$factor)) - 1;
-  unshift @masks, $mask;
-  $i++;
+my ($mask, @masks) = (0);
+while ($mask < $size) {
+    $mask = 1+($mask<<1);
+}
+push @masks, $mask;
+while ($mask) {
+  $mask >>= $factor;
+  push @masks, $mask;
 }
 my $levels = @masks;
 splice @masks, $max_levels if $max_levels; # cut-off
