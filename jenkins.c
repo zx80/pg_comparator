@@ -1,4 +1,4 @@
-/* $Id: jenkins.c 694 2010-04-03 13:10:45Z fabien $ */
+/* $Id: jenkins.c 737 2010-04-05 08:13:18Z fabien $ */
 
 #include <stdint.h>
 
@@ -42,7 +42,7 @@ static int32_t checksum_int4(unsigned char *data, size_t size)
 {
   uint32_t h = PN_32_1;
   if (data) h = jenkins_one_at_a_time_hash(0, data, size);
-  return h;
+  return (int32_t) h;
 }
 
 static int64_t checksum_int8(unsigned char *data, size_t size)
@@ -50,6 +50,7 @@ static int64_t checksum_int8(unsigned char *data, size_t size)
   uint64_t h1 = PN_32_2, h2 = PN_32_3;
   if (data) {
     h1 = jenkins_one_at_a_time_hash(0, data, size);
+    // ensure that size==0 => checksum==0
     h2 = size? jenkins_one_at_a_time_hash(PN_32_4, data, size): 0;
   }
   return (int64_t) ((h1<<32)|h2);

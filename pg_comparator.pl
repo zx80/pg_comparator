@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 699 2010-04-03 13:54:25Z fabien $
+# $Id: pg_comparator.pl 764 2010-07-13 07:46:58Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -9,7 +9,7 @@
 
 =head1 NAME
 
-B<pg_comparator> - network and time efficient table content comparison.
+B<pg_comparator> - efficient table content comparison and synchronization
 
 =head1 SYNOPSIS
 
@@ -17,14 +17,22 @@ B<pg_comparator> [options as B<--help> B<--option> B<--man>] conn1 conn2
 
 =head1 DESCRIPTION
 
-This script performs a network and time efficient comparison of two
-possibly large tables on two servers. It makes only sense to use it
-if the expected differences are relatively small. Optionally, it can
-synchronize the tables.
+This script performs a network and time efficient comparison or
+synchronization of two possibly large tables on two B<PostgreSQL> or B<MySQL>
+database servers, so as to detect inserted, updated or deleted tuples between
+these tables.
+The algorithm is efficient especially if the expected differences are
+relatively small.
 
-The implementation is quite generic: multi-column keys, no assumption
+The implementation is quite generic: multi-column keys
+(but there must be a key!), no assumption
 of data types other that they can be cast to text, subset of columns
 can be used for the comparison, handling of NULL values...
+
+This script focuses on the comparison algorithm, hence the many options.
+The fact that it may do anything useful, such as checking that a replication
+tool does indeed replicates your data, or such as synchronizing tables,
+is a mere side effect.
 
 =head1 OPTIONS
 
@@ -42,11 +50,14 @@ Default is 'xor'.
 
 =item C<--ask-pass>
 
-Ask for passwords interactively.
+Ask for passwords interactively. See also C<--env-pass> option below.
 
-=item C<--assume-size=...>
+=item C<--assume-size=n>
 
-Assume the provided value as the table size, thus skipping the COUNT query.
+Assume this value as the table size. It is sufficient for the algorithm to
+perform well that this size is in the order of magnitude of the actual table
+size.
+Default is to query the table sizes, which is skipped if this option is set.
 
 =item C<--checksum-function=fun> or C<--cf=fun> or C<-c fun>
 
@@ -60,24 +71,33 @@ Checksum size, 2 4 or 8 bytes. Default is 8.
 =item C<--cleanup>
 
 Drop checksum and summary tables beforehand.
-Useful after a run with C<--no-temp>.
+Useful after a run with C<--no-temp> and C<--no-clear>.
 
 =item C<--clear>
 
-Drop checksum and summary tables explicitely after the computation.
-Note that they are dropped implicitely by default when the connection
-is closed because they are temporary.
+Drop checksum and summary tables explicitly after the computation.
+Note that they are dropped implicitly by default when the connection
+is closed as they are temporary.
+
+=item C<--env-pass=var>
+
+Take password from environment variables C<var1>, C<var2> or C<var>
+for connection one, two, or both.
+This is tried before asking interactively if C<--ask-pass> is also set.
 
 =item C<--expect n> or C<-e n>
 
-Total number of differences to expect (updates, deletes and inserts),
-used for non regression tests.
+Total number of differences to expect (updates, deletes and inserts).
+This option is used by non regression tests.
 
 =item C<--folding-factor=8> or C<-f 8>
 
-Folding factor: log2 of the number of rows grouped together at each stage.
-Default chosen after some basic tests on medium-size cases.
+Folding factor: log2 of the number of rows grouped together at each stage,
+starting from the leaves so that the first round always groups as many records
+as possible.
+The power of two allows to use masked computations.
 The minimum value of 1 builds a binary tree.
+Default chosen after some basic tests on medium-size cases.
 Good values for large databases and low bandwidth is 10 to 12.
 
 =item C<--help> or C<-h>
@@ -88,11 +108,18 @@ Show short help.
 
 Show manual page.
 
-=item C<--max-report=1024>
+=item C<--max-ratio=0.1>
 
-Maximum search effort, search will stop if above this threshold:
-it gives up if a single query at any level involves more than this
-many differences. Use 0 for no limit.
+Maximum relative search effort. The search is stopped if the number of results
+is above this threshold expressed relatively to the table size.
+Use 2.0 for no limit (all tuples are deleted and new one where inserted).
+
+=item C<--max-report=n>
+
+Maximum absolute search effort. The search is stopped if the number of
+differences goes beyond this threshold. If set, the previous C<--max-ratio>
+option is ignored, otherwise the effort is computed with the ratio once
+the table size is known.
 
 =item C<--max-levels=0>
 
@@ -100,7 +127,7 @@ Maximum number of levels used. Allows to cut-off folding.
 Default is 0, meaning no cut-off. Setting a value of 1
 only uses the checksum table, without summaries.
 
-=item C<--null=how>
+=item C<--null=text>
 
 How to handle NULL values. Either B<hash> to hash all values, where NULL
 has one special hash value, or B<text> where NULL values are substituted
@@ -129,11 +156,18 @@ Whether to use temporary tables. Default is to use.
 If you don't, the tables are kept at the end, so they will have
 to be deleted by hand.
 
-=item C<--threads> or C<-T>
+=item C<--threads> or C<-T>, C<--no-threads> or C<-N>
 
-Use threads: a synonymous for "segmentation fault":-)
-It seems that DBI or DBD::Pg does not like threads at all...
-See bug report L<http://rt.cpan.org/Public/Bug/Display.html?id=55755>.
+Highly EXPERIMENTAL feature.
+
+Try to use threads to perform computations in parallel, with some hocus-pocus
+because perl thread model does not really work well with DBI.
+Default is not to use threads.
+
+Beware that using threads has an impact on other features: non temporary
+tables are used, the operations are performed out of a transaction, and
+clearing is done afterwards. Also note that perl threads are rather heavy
+and slow, more like communicating processes than light weight threads, really.
 
 =item C<--stats>
 
@@ -169,7 +203,7 @@ Show version information.
 
 SQL boolean condition on table tuples for partial comparison.
 Useful to reduce the load if you know that expected differences are in
-some particular parts of your data, say those timestamped today...
+some parts of your data, say those time-stamped today...
 
 =back
 
@@ -177,10 +211,11 @@ some particular parts of your data, say those timestamped today...
 
 The two arguments describe database connections with the following URL-like
 syntax, where square brackets denote optional parts. Many parts are optional
-with a default. The minimum syntactically correct specification is C</>.
+with a default. The minimum syntactically correct specification is C</>, but
+that does not necessary mean anything useful.
 See also the EXAMPLES section bellow.
 
-  [driver://][login[:pass]@][host[:port]]/[base/[[schema.]table[?key:cols]]]
+  [driver://][login[:pass]@][host[:port]]/[base/[[schema.]table[?key[:cols]]]]
 
 =over 4
 
@@ -204,7 +239,7 @@ Note that it is a bad idea to put a password as an command argument.
 Default is none for the first connection, and the same password
 as the first connection for the second I<if> the connection targets
 the same host, port and uses the same login.
-See also B<--ask-pass> option.
+See also B<--ask-pass> and B<--env-pass> options.
 
 =item B<host>
 
@@ -226,19 +261,45 @@ The possibly schema-qualified table to use for comparison.
 No default for first connection.
 Default is same as first connection for second connection.
 
+Note that MySQL does not have I<schemas>, but strangely enough
+their I<database> concept is just like a I<schema>,
+so MySQL really does not have I<databases>, although there is
+something of that name. Am I clear?
+
 =item B<keys>
 
 Comma-separated list of key columns.
-No default for first connection.
+Default is table primary key for first connection.
 Default is same as first connection for second connection.
+The key B<cannot> be empty. If you do not have a way of identifying
+your tuples, then there is no point in looking for differences.
 
 =item B<cols>
 
-Comma-separated list of columns to compare.
-May be empty. No default for first connection.
+Comma-separated list of columns to compare. May be empty.
+Default is all columns but B<keys> for first connection.
 Default is same as first connection for second connection.
+Beware that C<...?key:> means an empty cols, while C<...?key> sets the default.
 
 =back
+
+=head1 EXAMPLES
+
+Compare tables calvin and hobbes in database family on localhost,
+with key I<id> and columns I<c1> and I<c2>:
+
+  ./pg_comparator /family/calvin?id:c1,c2 /family/hobbes
+
+Compare tables calvin in default database on localhost and the same
+table in default database on sablons, with key I<id> and column I<data>:
+
+  ./pg_comparator localhost/family/calvin?id:data sablons/
+
+Synchronize C<user> table in database C<wikipedia> from MySQL on
+C<server1> to PostgreSQL on C<server2>.
+
+  ./pg_comparator -S -D --ask-pass \
+      mysql://calvin@server1/wikipedia/user pgsql://hobbes@server2/
 
 =head1 OUTPUT
 
@@ -283,7 +344,8 @@ The C<COALESCE> function takes care of NULL values in columns.
 
 A checksum function must be used to reduce and distribute key
 and columns values. It may be changed with the B<--checksum> option.
-Its size can be selected with the B<--checksize> option (2, 4 or 8 bytes).
+Its size can be selected with the B<--checksize> option (currently 2, 4 or 8
+bytes).
 
 Suitable implementations are available for PostgreSQL and can be loaded into
 the server by processing C<share/contrib/checksum.sql>. New checksums and
@@ -317,25 +379,13 @@ and C<DBD::mysql> to connect to MySQL.
 
 =item
 
-C<Term::ReadPassword> for ask-pass option.
+C<Term::ReadPassword> for C<--ask-pass> option.
 
 =item
 
-C<Pod::Usage> for doc self-extraction (--man --opt --help).
+C<Pod::Usage> for doc self-extraction (C<--man> C<--opt> C<--help>).
 
 =back
-
-=head1 EXAMPLES
-
-Compare tables calvin and hobbes in database family on localhost,
-with key I<id> and columns I<c1> and I<c2>:
-
-  ./pg_comparator /family/calvin?id:c1,c2 /family/hobbes
-
-Compare tables calvin in default database on localhost and the same
-table in default database on sablons, with key I<id> and column I<data>:
-
-  ./pg_comparator localhost/family/calvin?id:data sablons/
 
 =head1 ALGORITHM
 
@@ -366,7 +416,7 @@ Keys of differing tuples are displayed.
 
 =head2 CHECKSUM TABLE
 
-The first phase computes the initial cheksum table I<t(0)> on each side.
+The first phase computes the initial checksum table I<t(0)> on each side.
 Assuming that I<key> is the table key columns, and I<cols> is the
 table data columns that are to be checked for differences, then
 it is performed by querying target table I<t> as follow:
@@ -375,10 +425,10 @@ it is performed by querying target table I<t> as follow:
   SELECT key AS id, checksum(key) AS idc, checksum(key || cols) AS cks
   FROM t;
 
-The inititial key is kept, as it will be used to show differing keys
+The initial key is kept, as it will be used to show differing keys
 at the end. The rational for the I<idc> column is to randomize the
-key-values distribution so as to balance aggrates in the next phase.
-The key must appear in the cheksum also, otherwise content exchanged
+key-values distribution so as to balance aggregates in the next phase.
+The key must appear in the checksum also, otherwise content exchanged
 between two keys would not be detected in some cases.
 
 =head2 SUMMARY TABLES
@@ -422,14 +472,14 @@ last summary table, mask is 0, 1 row.
 
 =back
 
-It is important that the very same masks are used so that aggregations
-are the same, allowing to compare matching contents on both sides.
+It is important that the very same masks are used on both sides so that
+aggregations are the same, allowing to compare matching contents on both sides.
 
 =head2 SEARCH FOR DIFFERENCES
 
 After all these support tables are built on both sides comes the search for
 differences. When checking the checksum summary of the last tables (level I<n>)
-with only one row, it is basically a comparison of the cheksum of the
+with only one row, it is basically a comparison of the checksum of the
 whole table contents. If they match, then both tables are equal,
 and we are done. Otherwise, if these checksums differ, some investigation
 is needed to detect offending keys.
@@ -477,51 +527,58 @@ Cases 3 and 4 are simply symmetrical, and it is only an interpretation
 to decide whether it is an insert or a delete, taking the first side
 as the reference.
 
-=head2 IMPLEMENTATION ISSUES
-
-The checksum implementation gives integers, which are constant length
-and easy to manipulate afterwards.
-
-The xor aggregate is a good choice because there is no overflow issue with it
-and it takes into account all bits of the input.
-
-NULL values must be taken care appropriatelly.
-
-The folding factor and all modules are taken as power of two...
-
-There is a special management of large chunks of deletes or inserts
-which is implemented although not detailed in the algorithmic overview
-above nor the complexity analysis below.
-
-=head1 ANALYSIS
+=head2 ANALYSIS
 
 Let I<n> be the number of rows, I<r> the row size, I<f> the folding factor
-and I<k> the number of differences to be detected. Then ISTM that:
+and I<k> the number of differences to be detected, then the costs
+to identify differences is:
 
 =over 2
 
 =item B<network volume>
 
-is better than I<k*f*ceil(log(n)/log(f))>: it is independent of I<r>,
-the lower I<f> the better, and you want I<k<<n>.
+is better than I<k*f*ceil(log(n)/log(f))*log(n)>.
+the contents of I<k> blocks of size I<f> is transferred on the depth
+of the tree, and each block identifier is of size I<log(n)>.
+it is independent of I<r>, and you want I<k<<n>.
 
-=item B<number of requests>
+=item B<number of requests (on each side)>
 
-maximum is I<6+2*ceil(log(n)/log(f))>,
-minimum is I<6+ceil(log(n)/log(f))> for equal tables.
+minimum is I<6+ceil(log(n)/log(f))> for equal tables,
+maximum is I<6+2*ceil(log(n)/log(f))>.
 
 =item B<disk I/O traffic>
 
-is about I<n*r+n*ln(n)*(f/(f-1))>. Here a not too small I<f> is better, as
-it reduces both the number of requests and of disk I/Os;
+is about I<n*r+n*ln(n)*(f/(f-1))>.
 
 =back
 
-The choice of I<f> is indeed a tradeoff.
+The lower the folding factor I<f> the better for the network volume,
+but the higher the better for the number of requests and disk I/Os:
+the choice of I<f> is a tradeoff.
 
-=head1 REFERENCES
+=head2 IMPLEMENTATION ISSUES
 
-This script and algorithm was somehow inspired by:
+The checksum implementation gives integers, which are constant length
+and easy to manipulate afterwards.
+
+The B<xor> aggregate is a good choice because there is no overflow issue with
+it, it takes into account all bits of the input, and it can easily be defined
+on any binary data. The B<sum> aggregate is also okay, but it requires some
+kind of integer type.
+
+NULL values must be taken care appropriately.
+
+The folding factor and all modules are taken as power of two so as to use
+a masks.
+
+There is a special management of large chunks of deletes or inserts
+which is implemented although not detailed in the algorithmic overview
+and complexity analysis.
+
+=head2 REFERENCES
+
+This script and algorithm was inspired by:
 
 =over 2
 
@@ -547,35 +604,37 @@ It finds UPDATE, DELETE and INSERT between the two tables.
 The checksum and summary hierarchical level idea is reused and generalized
 so as to reduce the algorithmic complexity.
 
-From the implementation standpoint, the script is as parametric
-as possible thru many options, and makes as few assumptions
-as possible about table structures, types and values.
+From the implementation standpoint, the script is as parametric as possible
+with many options, and makes few assumptions about table structures, types
+and values.
 
 =head1 SEE ALSO
 
 I<Michael Nacos> made a robust implementation L<http://pgdba.net/pg51g/>
 based on triggers. He also noted that although database contents are compared
-by the algorithm, the database I<structure> differences can also be detected
+by the algorithm, the database schema differences can I<also> be detected
 by comparing system tables which describe these.
 
 I<Benjamin Mead Vandiver>'s PhD Thesis
 B<Detecting and Tolerating Byzantine Faults in Database Systems>,
 Massachusset's Institute of Technology, May 2008
 (report number MIT-CSAIL-TR-2008-040).
-There is an interesting discussion in Chapter 7, and experiments are presented
-on a Java/JDBC/MySQL implementation of several algorithms.
+There is an interesting discussion in Chapter 7, where experiments are
+presented with a Java/JDBC/MySQL implementation of two algorithms, including
+this one.
 
 Some products or projects implement such features, for instance:
 L<http://code.google.com/p/maatkit/> (mk-table-sync, by I<Baron Schwartz>,
 see L<http://tinyurl.com/mysql-data-diff-algorithm>)
-L<http://www.programurl.com/software/sql-server-comparison.htm>
+L<http://www.citrustechnology.com/solutions/data-comparison>
+L<http://comparezilla.sourceforge.net/>
 L<http://www.dbbalance.com/db_comparison.htm>
+L<http://www.dbsolo.com/datacomp.html>
+L<http://www.devart.com/dbforge/sql/datacompare/>
 L<http://www.dkgas.com/dbdiff.htm>
+L<http://www.programurl.com/software/sql-server-comparison.htm>
 L<http://www.sql-server-tool.com/>
 L<http://sourceforge.net/projects/mysqltoolkit>
-L<http://www.citrustechnology.com/solutions/data-comparison>
-L<http://www.dbsolo.com/datacomp.html>
-L<http://comparezilla.sourceforge.net/>
 L<http://www.webyog.com/>
 
 =head1 BUGS
@@ -591,10 +650,14 @@ Do not attempt to synchronize while the table is being used!
 Maybe I should lock the table?
 
 Although the algorithm can work with some normalized columns
-(say strings are trimmed, lowercased, unicode normalized...),
+(say strings are trimmed, lowercased, Unicode normalized...),
 the implementation may not work at all.
 
 Tables with binary keys or with NULL in keys may not work.
+
+The script handles one table at a time. In order to synchronize
+several linked tables, you must disable referential integrity checks,
+then synchronize each tables, then re-enable the checks.
 
 =head1 VERSIONS
 
@@ -605,8 +668,28 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
+Improved documentation.
+Enhancement and fix by I<Maxim Beloivanenko>: handle quoted table names;
+work around bulk inserts and deletes which may be undefined.
+
+=item B<version 1.6.1> 2010-04-16 (r754)
+
+Improved documentation.
+Key and columns now defaults to primary key and all other columns of table
+in first connection.
+Password can be supplied from the environment.
+Default password for second connection always set depending on the first.
+Add max ratio option to express the relative maximum number of differences.
+Compute grouping masks by shifting left instead of right by default (that
+is doing a divide instead of a modulo).
+Threads now work a little, although it is still quite experimental.
+Fix a bug that made perl see differing checksum although they were equal, in
+some unclear conditions.
+
+=item B<version 1.6.0> 2010-04-03 (r701)
+
 Add more functions (MD5, SUM) and sizes (2, 4, 8).
-Remove template parametrization which is much too fragile to expose.
+Remove template parameterization which is much too fragile to expose.
 Add a wrapping transaction which may speed up things a little.
 Implementation for MySQL, including synchronizing heterogeneous databases.
 Improved documentation. Extensive validation/non regression tests.
@@ -632,7 +715,7 @@ Add C<--expect> option for non regression tests.
 Add more links.
 Fix so that with a key only (i.e. without additional columns), although
 it could be optimized further in this case.
-Integrate patch by I<Erik Aronesty>: More friendly "connection parsor".
+Integrate patch by I<Erik Aronesty>: More friendly "connection parser".
 Add synchronization option to actually synchronize the data.
 
 =item B<version 1.4.4> 2008-06-03 (r438)
@@ -692,7 +775,7 @@ Initial revision.
 Copyright (c) 2004-@YEAR@, Fabien Coelho <pg dot comparator at coelho dot net>
 L<http://www.coelho.net/>
 
-This softwere is distributed under the terms of the BSD Licence.
+This software is distributed under the terms of the BSD Licence.
 Basically, you can do whatever you want, but you have to keep
 the license... and I'm not responsible for any consequences.
 Beware, you may lose your data or your hairs because of this software!
@@ -712,12 +795,13 @@ my $script_version = '@VERSION@ (r@REVISION@)';
 ################################################################# SOME DEFAULTS
 
 # various option defaults
-my ($verb, $debug, $temp, $ask_pass) = (0, 0, 1, 0);
-my ($factor, $max_report, $max_levels, $usekey) =  (8, 1024, 0, 0);
+my ($verb, $debug, $temp, $ask_pass, $env_pass) = (0, 0, 1, 0, undef);
+my ($factor, $max_ratio, $max_report, $max_levels) =  (8, 0.1, undef, 0);
 my ($report, $threads, $cleanup, $stats, $skip, $clear) = (1, 0, 0, 0, 0, 0);
-my ($synchronize, $do_it, $do_transaction) = (0, 0, 1);
+my ($usekey, $synchronize, $do_it, $do_transaction) = (0, 0, 0, 1);
 my $prefix = 'cmp';
 my ($where, $expect);
+my ($maskleft) = 1;
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
@@ -759,12 +843,8 @@ sub parse_conn($)
   my ($db, $user, $pass, $host, $port, $base, $tabl, $keys, $cols);
 
   # get driver name
-  if ($c =~ /^pg(sql)?:\/\//i) {
-    $db = 'pgsql';
-    $c =~ s/^\w+:\/\///;
-  }
-  elsif ($c =~ /^my(sql)?:\/\//i) {
-    $db = 'mysql';
+  if ($c =~ /^(pg|my)(sql)?:\/\//) {
+    $db = $1 . 'sql';
     $c =~ s/^\w+:\/\///;
   }
   else {
@@ -794,21 +874,55 @@ sub parse_conn($)
   if ("$path")
   {
     # parse path base/schema.table?key,part:column,list,part
+    # accept postgresql (") and mysql (`) name quotes in table.
+    # ??? this would need a real lexer?
     die "invalid path string '$path'\n"
-      unless $path =~ /^(\w+)?(\/((\w+\.)?\w+))?(\?([\w\,]+)(\:([\w,]*))?)?$/;
+      unless $path =~ /
+        ^(\w+)?                                       # base
+         (\/((\w+\.|\"[^\"]+\"\.|\`[^\`]+\`\.)?       # schema.
+         (\w+|\"[^\"]+\"|\`[^\`]+\`)))?               # table
+         (\?([\w\,]+)                                 # key,part
+         (\:([\w,]*))?)?$                             # column,list...
+      /x;
 
     $base=$1 if defined $1;
     $tabl=$3 if defined $2;
-    $keys=$6 if defined $5;
-    $cols=$8 if defined $7;
+    $keys=$7 if defined $6;
+    $cols=$9 if defined $8;
 
     verb 3, "base=$base tabl=$tabl keys=$keys cols=$cols" if $debug;
   }
 
   # return result as a list
-  my @res = ($db,$user,$pass,$host,$port,$base,$tabl,$keys,$cols);
+  my @res = ($db, $user, $pass, $host, $port, $base, $tabl, $keys, $cols);
   verb 2, "connection parameters: @res" if $debug;
   return @res;
+}
+
+sub driver($)
+{
+  my ($db) = @_;
+  return 'DBI:Pg:' if $db eq 'pgsql';
+  return 'DBI:mysql:' if $db eq 'mysql';
+  die "unexpected db $db";
+}
+
+sub dbh_serialize($$)
+{
+  my ($dbh, $db) = @_;
+  if ($threads) {
+    verb 5, "serializing db=$db";
+    $_[0] = $dbh->take_imp_data
+  }
+}
+
+sub dbh_materialize($$)
+{
+  my ($dbh, $db) = @_;
+  if ($threads) {
+    verb 5, "materializing db=$db";
+    $_[0] = DBI->connect(driver($db), undef, undef, { 'dbi_imp_data' => $dbh })
+  }
 }
 
 # return connection template for database
@@ -821,9 +935,7 @@ sub source_template($)
   elsif ($db eq 'mysql') {
     return 'DBI:mysql:database=%b;host=%h;port=%p;';
   }
-  else {
-    die "unexpected db ($db)";
-  }
+  die "unexpected db ($db)";
 }
 
 # $dbh = conn($db,$base,$host,$port,$user,$pass)
@@ -838,7 +950,17 @@ sub conn($$$$$$)
 		{ RaiseError => 1, PrintError => 0, AutoCommit => 1 });
   verb 4, "connected to $u\@$h:$p/$b";
   # start a big transaction...
+  # LOCK TABLE $table IN EXCLUSIVE MODE;
   $dbh->begin_work if $do_transaction;
+  return $dbh;
+}
+
+sub build_conn($$$$$$)
+{
+  my ($db, $b, $h, $p, $u, $w) = @_;
+  verb 2, "connecting...";
+  my $dbh = conn($db, $b, $h, $p, $u, $w);
+  dbh_serialize($dbh, $db);
   return $dbh;
 }
 
@@ -866,6 +988,7 @@ sub sth_param_exec($$$@)
   my $verbose = $verb>2;
   my $index = 1;
   print STDERR '### binding ' if $verbose;
+  # ??? $sth->execute(@cols, split(/$sep/, $keys));
   for my $val (@cols, split(/$sep/, $keys)) {
     $sth->bind_param($index++, $val) if $doit;
     print STDERR $dbh1->quote($val), ', ' if $verbose;
@@ -876,13 +999,56 @@ sub sth_param_exec($$$@)
 
 ####################################################################### QUERIES
 
+# returns (schema, table)
+sub table_id($)
+{
+  my ($table) = @_;
+  # ??? quotes are kept
+  if ($table =~ /\./) {
+    # hmmm... does not make sense for mysql
+    return split '\.', $table;
+  }
+  else {
+    return ('', $table);
+  }
+}
+
+# get all attribute names, possibly ignoring a set of columns
+# ??? not counted...
+sub get_table_attributes($$$$@)
+{
+  my ($dbh, $db, $base, $table, @ignore) = @_;
+  dbh_materialize($dbh, $db);
+  my $sth = $dbh->column_info($base, table_id($table), '%');
+  my ($row, %cols);
+  while ($row = $sth->fetchrow_hashref) {
+    $cols{$$row{COLUMN_NAME}} = 1;
+  }
+  $sth->finish;
+  for my $k (@ignore) {
+    delete $cols{$k};
+  }
+  dbh_serialize($dbh, $db);
+  return sort keys %cols;
+}
+
+sub get_table_pkey($$$$)
+{
+  my ($dbh, $db, $base, $table) = @_;
+  dbh_materialize($dbh, $db);
+  my @keys = $dbh->primary_key($base, table_id($table));
+  dbh_serialize($dbh, $db);
+  return @keys;
+}
+
 # $number_of_rows = count($dbh,$table)
 sub count($$)
 {
   my ($dbh, $table) = @_;
-  # ??? count is not counted!
-  return $dbh->selectrow_array("SELECT COUNT(*) FROM $table" .
-			       (defined $where? " WHERE $where": ''));
+  my $q = "SELECT COUNT(*) FROM $table".(defined $where? " WHERE $where": '');
+  $query_nb++;
+  $query_sz += length($q);
+  return $dbh->selectrow_array($q);
 }
 
 # @l = subs(format, @column_names)
@@ -943,6 +1109,8 @@ sub cast_size($$$)
     return "${s}::INT$size";
   }
   elsif ($db eq 'mysql') {
+    # MySQL casts is a joke, you cannot really select any target type.
+    # so I reimplemented that in a function which returns a BIGINT whatever...
     return "biginttoint$size(CAST($s AS SIGNED))";
   }
   die "unexpected db $db";
@@ -1021,6 +1189,7 @@ sub ckatts($$$$$)
 sub compute_cheksum($$$$$$$)
 {
   my ($dbh, $db, $table, $keys, $cols, $name, $skip) = @_;
+  dbh_materialize($dbh, $db);
   verb 2, "building checksum table ${name}0";
   sql_do($dbh, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
   # ??? CREATE + INSERT SELECT to get row count?
@@ -1039,12 +1208,15 @@ sub compute_cheksum($$$$$$$)
 	 "FROM $table " .
 	 ($where? "WHERE $where": ''));
   # count should be available somewhere?
-  return $skip? 0: count($dbh, "${name}0");
+  my $count = $skip? 0: count($dbh, "${name}0");
+  dbh_serialize($dbh, $db);
+  return $count;
 }
 
+# return actual aggregate function from aggregate name
 sub aggregate($$)
 {
-  my ($db,$agg) = @_;
+  my ($db, $agg) = @_;
   return 'bit_xor' if $db eq 'mysql' and $agg eq 'xor';
   return $agg;
 }
@@ -1054,7 +1226,8 @@ sub aggregate($$)
 sub compute_summaries($$$@)
 {
   my ($dbh, $db, $name, @masks) = @_;
-  # compute cascade of summary tables
+  dbh_materialize($dbh, $db);
+  # compute cascade of summary tapbles
   for my $level (1 .. @masks-1) {
     verb 2, "building summary table ${name}$level ($masks[$level])";
     sql_do($dbh, "DROP TABLE IF EXISTS ${name}${level}") if $cleanup;
@@ -1066,10 +1239,11 @@ sub compute_summaries($$$@)
 	   "FROM ${name}" . ($level-1) . " " .
 	   "GROUP BY idc & $masks[$level]");
   }
+  dbh_serialize($dbh, $db);
 }
 
 # get info for investigated a list of idc (hopefully not too long)
-# $sth = selidc($dbh,$table,$mask,$get_id,@idc)
+# $sth = selidc($dbh, $table, $mask, $get_id, @idc)
 sub selidc($$$$$@)
 {
   my ($dbh, $db, $table, $mask, $get_id, @idc) = @_;
@@ -1093,10 +1267,14 @@ sub selidc($$$$$@)
 sub get_bulk_keys($$$$@)
 {
   my ($dbh, $db, $table, $nature, @idc_masks) = @_;
-  return (0, undef) unless @idc_masks; # bye if nothing to investigate
+  verb 1, "investigating $nature chunks (@idc_masks)";
+
+  # shortcut, nothing to investigate
+  return [] unless @idc_masks;
+
+  dbh_materialize($dbh, $db);
   my @keys = (); # results
   my $cond = ''; # select query condition. must not be empty.
-  verb 1, "investigating $nature chunks";
   for my $idc_mask (@idc_masks) {
     my ($idc,$mask) = split '/', $idc_mask;
     $cond .= ' OR ' if $cond;
@@ -1114,7 +1292,21 @@ sub get_bulk_keys($$$$@)
     push @keys, $row[0];
     print "$nature @row\n" if $report;
   }
-  return ($count, \@keys);
+  dbh_serialize($dbh, $db);
+
+  verb 4, "$nature count=$count";
+  return \@keys;
+}
+
+sub table_cleanup($$$$)
+{
+  my ($dbh, $db, $name, $levels) = @_;
+  verb 5, "cleaning $db/$name";
+  dbh_materialize($dbh, $db);
+  for my $i (0 .. $levels) {
+    sql_do($dbh, "DROP TABLE ${name}$i");
+  }
+  dbh_serialize($dbh, $db);
 }
 
 ############################################################### MERGE ALGORITHM
@@ -1130,6 +1322,9 @@ sub differences($$$$$$@)
   my (@insert, @update, @delete, @mask_insert, @mask_delete); # results
   my @idc = ();
 
+  dbh_materialize($dbh1, $db1);
+  dbh_materialize($dbh2, $db2);
+
   while ($level>=0 and $todo)
   {
     my @next_idc = ();
@@ -1137,8 +1332,11 @@ sub differences($$$$$$@)
 
     if ($max_report && @idc>$max_report) {
       print "giving up at level $level: too many differences.\n" .
-	    "\tadjust max option (current is $max_report) to proceed.\n" .
+	    "\tadjust --max-ratio option to proceed " .
+	    "(current ratio is $max_ratio, $max_report diffs)\n" .
 	    "\tidc list length is " . scalar @idc . ": @idc\n";
+      dbh_serialize($dbh1, $db1);
+      dbh_serialize($dbh2, $db2);
       return;
     }
 
@@ -1160,7 +1358,7 @@ sub differences($$$$$$@)
       # else both lists are defined
 
       if (@r1 && @r2 && $r1[0]==$r2[0]) { # matching idc
-	if ($r1[1] != $r2[1]) { # non matching checksums
+	if ($r1[1] ne $r2[1]) { # non matching checksums
 	  if ($level) {
 	    push @next_idc, $r1[0]; # to be investigated...
 	  } else {
@@ -1209,7 +1407,10 @@ sub differences($$$$$$@)
     $todo = @idc;
   }
 
-   return ($count, \@insert, \@update, \@delete, \@mask_insert, \@mask_delete);
+  dbh_serialize($dbh1, $db1);
+  dbh_serialize($dbh2, $db2);
+
+  return ($count, \@insert, \@update, \@delete, \@mask_insert, \@mask_delete);
 }
 
 ####################################################################### OPTIONS
@@ -1234,15 +1435,19 @@ GetOptions(
   "use-key|uk|u" => \$usekey,
   "assume-size|as=i" => \$skip,
   "folding-factor|factor|f=i" => \$factor,
-  "maximum-report|max-report|mr|x=i" => \$max_report,
+  "maximum-ratio|max-ratio|max|mr|x=f" => \$max_ratio,
   "maximum-levels|max-levels|ml=i" => \$max_levels,
+  "maximum-report|max-report=i" => \$max_report,
+  "mask-left|maskleft" => sub { $maskleft = 1; },
+  "mask-right|maskright" => sub { $maskleft = 0; },
   # table
   "temporary|temp|tmp|t!" => \$temp,
   "cleanup!" => \$cleanup,
   "clear!" => \$clear,
   "prefix|p=s" => \$prefix,
   # connection
-  "ask-pass|ap!" => \$ask_pass,
+  "ask-password|ask-passwd|ask-pass|ap!" => \$ask_pass,
+  "environment-password|env-password|env-passwd|env-pass|ep=s" => \$env_pass,
   "transaction|trans|tr!" => \$do_transaction,
   # functions
   "synchronize|sync|S!" => \$synchronize,
@@ -1251,9 +1456,23 @@ GetOptions(
   "report|r!" => \$report,
   # misc
   "threads|T!" => \$threads,
+  "nt|nT|N" => sub { $threads = 0; },
   "statistics|stats!" => \$stats,
   "version|V" => sub { print "$0 version is $script_version\n"; }
 ) or die "$! (try $0 --help)";
+
+$max_report = $expect if defined $expect and not defined $max_report;
+
+# fix default options when using threads...
+if ($threads and not $debug)
+{
+  warn "WARNING some options fixed for threads...";
+  # it seems that statements are closed when playing with threads
+  # so that commits & temporary removal are done automatically...
+  $temp = 0;
+  $do_transaction = 0;
+  $clear = 1;
+}
 
 # fix --temp or --no-temp option
 $temp = $temp? 'TEMPORARY ': '';
@@ -1263,6 +1482,7 @@ $factor = 1 if $factor<1;
 $factor = 30 if $factor>30;
 
 # intermediate table names
+# what about putting the table name as well?
 my ($name1, $name2) = ("${prefix}_1_", "${prefix}_2_");
 
 # argument management
@@ -1280,8 +1500,6 @@ $p1 = 3306 if not defined $p1 and $db1 eq 'mysql';
 # these are necessary
 die "no base on first connection" unless defined $b1;
 die "no table on first connection" unless defined $t1;
-die "no key on first connection" unless defined $k1;
-$c1 = '' unless defined $c1;
 
 # second connection
 my ($db2, $u2, $w2, $h2, $p2, $b2, $t2, $k2, $c2) = parse_conn(shift);
@@ -1291,9 +1509,104 @@ $u2 = $u1 unless defined $u2;
 $h2 = 'localhost' unless defined $h2;
 $p2 = 5432 if not defined $p2 and $db2 eq 'pgsql';
 $p2 = 3306 if not defined $p2 and $db2 eq 'mysql';
-$w2 = $w1 unless $w2 or not $w1 or $u1 ne $u2 or $h1 ne $h2 or $p1!=$p2;
 $b2 = $b1 unless defined $b2;
 $t2 = $t1 unless defined $t2;
+
+die "null should be 'text' or 'hash', got $null"
+    unless $null =~ /^(text|hash)$/i;
+
+die "checksum should be 'md5' or 'ck', got ($checksum)"
+    unless $checksum =~ /^(md5|ck)$/i;
+
+die "checksize must be 2, 4 or 8, got ($checksize)"
+    unless $checksize =~ /^[248]$/;
+
+die "aggregate must be 'xor' or 'sum', got ($agg)"
+    unless $agg =~ /^(xor|sum)$/i;
+
+# database connection...
+if (defined $env_pass and not defined $w1)
+{
+  $w1 = $ENV{"${env_pass}1"};
+  $w1 = $ENV{$env_pass} unless defined $w1;
+}
+if ($ask_pass and not defined $w1)
+{
+  require Term::ReadPassword;
+  $w1 = Term::ReadPassword::read_password('connection 1 password> ');
+}
+
+$w2 = $w1 unless $w2 or not $w1 or $u1 ne $u2 or $h1 ne $h2 or $p1!=$p2;
+
+if (defined $env_pass and not defined $w2)
+{
+  $w2 = $ENV{"${env_pass}2"};
+  $w2 = $ENV{$env_pass} unless defined $w2;
+}
+if ($ask_pass and not defined $w2)
+{
+  require Term::ReadPassword;
+  $w2 = Term::ReadPassword::read_password('connection 2 password> ');
+}
+
+########################################################### THREADED OPERATIONS
+
+#  .   options...
+# | |  connection1 || connection2
+#  .   get default columns if necessary
+# | |  count1 || count2
+#  .   compute mask list
+# | |  checksum1 || checksum2
+#  ?   artificial synchro to get current time
+# | |  summary1 || summary2
+#  .   compute differences
+# | |  bulk1 || bulk2
+#  .   synchronize if required
+# | |  cleanup
+#  .   commit
+
+use Time::HiRes qw(gettimeofday tv_interval);
+my ($t0, $tcks, $tsum, $tmer, $tblk, $tsyn, $tclr, $tend);
+$t0 = [gettimeofday] if $stats;
+
+verb 1, "connecting...";
+my ($thr1, $thr2);
+if ($threads)
+{
+  require threads;
+  ($thr1) = threads->new(\&build_conn, $db1, $b1, $h1, $p1, $u1, $w1)
+    or die "cannot create thread 1-1";
+
+  ($thr2) = threads->new(\&build_conn, $db2, $b2, $h2, $p2, $u2, $w2)
+    or die "cannot create thread 2-1";
+
+  verb 1, "waiting for connexions and counts...";
+  ($dbh1) = $thr1->join();
+  ($dbh2) = $thr2->join();
+}
+else
+{
+  ($dbh1) = build_conn($db1, $b1, $h1, $p1, $u1, $w1);
+  ($dbh2) = build_conn($db2, $b2, $h2, $p2, $u2, $w2);
+}
+
+# set defaults...
+if (not defined $k1)
+{
+  my @keys = get_table_pkey($dbh1, $db1, $b1, $t1);
+  $c1 = join ',', get_table_attributes($dbh1, $db1, $b1, $t1, @keys);
+  $k1 = join ',', @keys;
+  warn "default key & attribute on first connection but not on second..."
+      if defined $k2;
+}
+elsif (not defined $c1)
+{
+  $c1 = join ',', get_table_attributes($dbh1, $db1, $b1, $t1, split(/,/,$k1));
+  # warn, as this may lead to unexpected results...
+  warn "default attributes on first connection but not on second..."
+      if defined $c2;
+}
+
 $k2 = $k1 unless defined $k2;
 $c2 = $c1 unless defined $c2;
 
@@ -1306,81 +1619,41 @@ my @c2 = split ',', $c2;
 # more sanity checks
 die "key number of attributes does not match" unless @k1 == @k2;
 die "column number of attributes does not match" unless @c1 == @c2;
+die "use-key option requires a simple integer key, got (@k1)"
+  if $usekey and @k1 != 1;
 
-die "null should be 'text' or 'hash', got $null"
-    unless $null =~ /^(text|hash)$/;
-
-die "checksum should be 'md5' or 'ck', got ($checksum)"
-    unless $checksum =~ /^(md5|ck)$/i;
-
-die "checksize must be 2, 4 or 8, got ($checksize)"
-    unless $checksize =~ /^[248]$/;
-
-die "aggregate must be 'xor' or 'sum', got ($agg)"
-    unless $agg =~ /^(xor|sum)$/i;
-
-die "use-key option requires a simple integer key, got (@k1) and (@k2)"
-    if $usekey and @k1 != 1;
-
-# database connection...
-if ($ask_pass)
-{
-  require Term::ReadPassword;
-  $w1 = Term::ReadPassword::read_password('connection 1 password> ');
-  # hmmm... I could reuse the previous pass?
-  # what about on demand, when the connection fails?
-  $w2 = Term::ReadPassword::read_password('connection 2 password> ');
-}
-
-############################################################ THREADED FUNCTIONS
-
-# let us work on both data in parallel
-sub conn_and_cksum($$$$$$$$$$$)
-{
-  my ($db, $b, $h, $p, $u, $w, $t, $k, $c, $n, $skip) = @_;
-  verb 2, "connecting...";
-  my $dbh = conn($db, $b, $h, $p, $u, $w);
-  verb 2, "checksumming...";
-  my $count = compute_cheksum($dbh, $db, $t, $k, $c, $n, $skip);
-  return $dbh, $count;
-}
-
-use Time::HiRes qw(gettimeofday tv_interval);
-my ($t0, $tcks, $tsum, $tmer, $tblk, $tsyn, $tclr, $tend);
-$t0 = [gettimeofday] if $stats;
-
-verb 1, "connection and checksum...";
-my ($thr1, $count1, $thr2, $count2);
+verb 1, "checksumming...";
+my ($count1, $count2);
 if ($threads)
 {
-  require threads;
-  ($thr1) = threads->new(\&conn_and_cksum, $db1,
-       $b1, $h1, $p1, $u1, $w1, $t1, $k1, $c1, $name1, $skip)
+  ($thr1) = threads->new(\&compute_cheksum,
+			 $dbh1, $db1, $t1, $k1, $c1, $name1, $skip)
     or die "cannot create thread 1-1";
 
-  ($thr2) = threads->new(\&conn_and_cksum, $db2,
-       $b2, $h2, $p2, $u2, $w2, $t2, $k2, $c2, $name2, $skip)
+  ($thr2) = threads->new(\&compute_cheksum,
+			 $dbh2, $db2, $t2, $k2, $c2, $name2, $skip)
     or die "cannot create thread 2-1";
 
   verb 1, "waiting for connexions and counts...";
-  ($dbh1, $count1) = $thr1->join();
-  ($dbh2, $count2) = $thr2->join();
+  ($count1) = $thr1->join();
+  ($count2) = $thr2->join();
 }
 else
 {
-  ($dbh1, $count1) = conn_and_cksum($db1,
-      $b1, $h1, $p1, $u1, $w1, $t1, $k1, $c1, $name1, $skip);
-
-  ($dbh2, $count2) = conn_and_cksum($db2,
-      $b2, $h2, $p2, $u2, $w2, $t2, $k2, $c2, $name2, $skip);
+  ($count1) = compute_cheksum($dbh1, $db1, $t1, $k1, $c1, $name1, $skip);
+  ($count2) = compute_cheksum($dbh2, $db2, $t2, $k2, $c2, $name2, $skip);
 }
 
 verb 1, "computing size and masks after folding factor...";
 $count1 = $count2 = $skip if $skip;
 
+my $size = $count1>$count2? $count1: $count2; # MAX
+
+# stop at this number of differences
+$max_report = $max_ratio * $size unless defined $max_report;
+
 # ??? |count2-count1|>max_diff => abort ?
 
-my $size = $count1>$count2? $count1: $count2; # max?
 my ($mask, $nbits, @masks) = (0, 0);
 while ($mask < $size) {
   $mask = 1+($mask<<1);
@@ -1388,7 +1661,12 @@ while ($mask < $size) {
 }
 push @masks, $mask; # this is the full mask, which is skipped later on
 while ($mask) {
-  $mask >>= $factor;
+  if ($maskleft) {
+    $mask &= ($mask << $factor);
+  }
+  else {
+    $mask >>= $factor;
+  }
   push @masks, $mask;
 }
 my $levels = @masks;
@@ -1420,16 +1698,17 @@ $tsum = [gettimeofday] if $stats;
 verb 1, "looking for differences...";
 my ($count, $ins, $upt, $del, $bins, $bdel) =
   differences($dbh1, $dbh2, $db1, $db2, $name1, $name2, @masks);
+verb 2, "differences done";
 
 $tmer = [gettimeofday] if $stats;
 
 # now take care of big chunks of INSERT or DELETE if necessary
 # should never happen in normal "few differences" conditions
-verb 1, "bulk delete: @{$bdel}" if @$bdel;
-verb 1, "bulk insert: @{$bins}" if @$bins;
+verb 1, "bulk delete: @{$bdel}" if defined $bdel and @$bdel;
+verb 1, "bulk insert: @{$bins}" if defined $bins and @$bins;
 
-my ($bic, $bdc, $insb, $delb) = (0, 0, undef, undef);
-if (@$bins or @$bdel)
+my ($bic, $bdc, $insb, $delb) = (0, 0);
+if ((defined @$bins and @$bins) or (defined $bdel and @$bdel))
 {
   verb 1, "resolving bulk inserts and deletes...";
   # this cost two full table-0 scans, one on each side...
@@ -1444,14 +1723,27 @@ if (@$bins or @$bdel)
 			 $dbh2, $db2, "${name2}0", 'DELETE', @$bdel)
       or die "cannot create thread 2-3";
 
-    ($bic, $insb) = $thr1->join();
-    ($bdc, $delb) = $thr2->join();
+    $insb = $thr1->join();
+    $delb = $thr2->join();
   }
   else
   {
-    ($bic, $insb) = get_bulk_keys($dbh1, $db1, "${name1}0", 'INSERT', @$bins);
-    ($bdc, $delb) = get_bulk_keys($dbh2, $db2, "${name2}0", 'DELETE', @$bdel);
+    $insb = get_bulk_keys($dbh1, $db1, "${name1}0", 'INSERT', @$bins);
+    $delb = get_bulk_keys($dbh2, $db2, "${name2}0", 'DELETE', @$bdel);
   }
+
+  # ??? fix?
+  $insb = [] unless defined $insb;
+  $delb = [] unless defined $delb;
+
+  $bic = @$insb;
+  $bdc = @$delb;
+}
+else
+{
+  # ??? is it necessary?
+  $insb = [] unless defined $insb;
+  $delb = [] unless defined $delb;
 }
 
 # update count with bulk contents
@@ -1467,6 +1759,9 @@ if ($synchronize and
     (@$del or @$ins or @$upt or defined $insb or defined $delb))
 {
   verb 1, "synchronizing...";
+
+  dbh_materialize($dbh1, $db1);
+  dbh_materialize($dbh2, $db2);
 
   $dbh2->begin_work if $do_it and not $do_transaction;
 
@@ -1531,6 +1826,9 @@ if ($synchronize and
 
   $dbh2->commit if $do_it and not $do_transaction;
 
+  dbh_serialize($dbh1, $db1);
+  dbh_serialize($dbh2, $db2);
+
   print
       "\n",
       "*** WARNING ***\n",
@@ -1544,32 +1842,32 @@ if ($synchronize and
 
 $tsyn = [gettimeofday];
 
-sub table_cleanup($$$)
-{
-  my ($dbh, $name, $levels) = @_;
-  for my $i (0 .. $levels) {
-    sql_do($dbh, "DROP TABLE ${name}$i");
-  }
-}
-
 if ($clear)
 {
+  verb 4, "clearing...";
   my $levels = @masks - 1;
-  if ($threads)
+  if ($threads and $debug)
   {
-    $thr1 = threads->new(&table_cleanup, $dbh1, $name1, $levels);
-    $thr2 = threads->new(&table_cleanup, $dbh2, $name2, $levels);
+    $thr1 = threads->new(&table_cleanup, $dbh1, $db1, $name1, $levels)
+	or die "cannot create thread 1-4";
+    $thr2 = threads->new(&table_cleanup, $dbh2, $db2, $name2, $levels)
+	or die "cannot create thread 2-4";
     $thr1->join();
     $thr2->join();
   }
   else
   {
-    table_cleanup($dbh1, $name1, $levels);
-    table_cleanup($dbh2, $name2, $levels);
+    table_cleanup($dbh1, $db1, $name1, $levels);
+    table_cleanup($dbh2, $db2, $name2, $levels);
   }
+  verb 4, "clearing done."
 }
 
 $tclr = [gettimeofday];
+
+# recreate database handler for the end...
+dbh_materialize($dbh1, $db1);
+dbh_materialize($dbh2, $db2);
 
 # end of the big transactions...
 if ($do_transaction)
@@ -1584,10 +1882,12 @@ if ($do_transaction)
 # @$upd: key update
 # @$del @$delb: key delete (ind & bulks)
 
-verb 1, "done, $count differences found...";
-$dbh1->disconnect();  $dbh2->disconnect();
+$dbh1->disconnect();
+$dbh2->disconnect();
 
 #################################################################### STATISTICS
+
+verb 1, "done, $count differences found...";
 
 sub delay($$)
 {
@@ -1602,6 +1902,7 @@ if ($stats)
 
   # summary of performances/instrumentation
   print
+    "       testing: $db1/$db2\n",
     "   table count: $size\n",
     "folding factor: $factor\n",
     "        levels: ", scalar @masks, " (cut-off from $levels)\n",

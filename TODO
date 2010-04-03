@@ -1,6 +1,3 @@
-* doc
-- provide meaningful examples in the documentation
-
 * general
 - rename pg_table_sync or pg_sync if available?
 - optimality?
@@ -12,7 +9,7 @@
 - try create + insert from select if count directly available?
 - what to count: select vs create vs drop?
 - allow functions? e.g. lower(col1), trim(col2)...
-- port cksum to mysql
 
 * pointers
 - http://www.sql-server-performance.com/articles/dba/database_comparison_sp_p1.aspx
+- http://www.devart.com/blogs/dbforge/?p=1056

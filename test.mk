@@ -1,4 +1,4 @@
-# $Id: test.mk 698 2010-04-03 13:33:13Z fabien $
+# $Id: test.mk 744 2010-04-05 19:34:33Z fabien $
 
 SHELL	= /bin/bash
 
@@ -108,27 +108,27 @@ test_mixed:
 #
 test_fast:
 	$(MAKE) CF=md5 CS=8 AGG=sum NULL=text \
-		ROWS=20 FOLD=1 KEYS=0 COLS=0 test_run
+		FOLD=1 KEYS=0 COLS=0 test_run
 	$(MAKE) CF=md5 CS=8 AGG=sum NULL=hash \
-		ROWS=20 FOLD=1 KEYS=0 COLS=1 test_run
+		FOLD=1 KEYS=0 COLS=1 test_run
 	$(MAKE) CF=md5 CS=8 AGG=sum NULL=text \
-		ROWS=20 FOLD=1 KEYS=1 COLS=2 test_run
+		FOLD=1 KEYS=1 COLS=2 test_run
 	$(MAKE) CF=md5 CS=4 AGG=sum NULL=hash \
-		ROWS=20 FOLD=3 KEYS=0 COLS=2 test_run
+		FOLD=3 KEYS=0 COLS=2 test_run
 	$(MAKE) CF=ck CS=8 AGG=sum NULL=text \
-		ROWS=20 FOLD=2 KEYS=0 COLS=1 test_run
+		FOLD=2 KEYS=0 COLS=1 test_run
 	$(MAKE) CF=ck CS=4 AGG=sum NULL=hash \
-		ROWS=20 FOLD=4 KEYS=1 COLS=0 test_run
+		FOLD=4 KEYS=1 COLS=0 test_run
 	$(MAKE) CF=ck CS=8 AGG=sum NULL=hash \
-		ROWS=20 FOLD=4 KEYS=1 COLS=3 test_run
+		FOLD=4 KEYS=1 COLS=3 test_run
 	$(MAKE) CF=md5 CS=8 AGG=xor NULL=text \
-		ROWS=20 FOLD=5 KEYS=1 COLS=1 test_run
+		FOLD=5 KEYS=1 COLS=1 test_run
 	$(MAKE) CF=ck CS=4 AGG=xor NULL=hash \
-		ROWS=20 FOLD=7 KEYS=2 COLS=3 test_run
+		FOLD=7 KEYS=2 COLS=3 test_run
 	$(MAKE) CF=ck CS=8 AGG=xor NULL=text \
-		ROWS=20 FOLD=6 KEYS=1 COLS=2 test_run
+		FOLD=6 KEYS=1 COLS=2 test_run
 	$(MAKE) CF=ck CS=8 AGG=xor NULL=hash \
-		ROWS=20 FOLD=8 KEYS=2 COLS=3 test_run
+		FOLD=8 KEYS=2 COLS=3 test_run
 
 test_fast_mysql: test_fast
 test_fast_pgsql: test_fast
