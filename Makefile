@@ -1,4 +1,4 @@
-# $Id: Makefile 512 2010-03-20 22:47:26Z fabien $
+# $Id: Makefile 700 2010-04-03 14:06:36Z fabien $
 
 name		= pg_comparator
 
@@ -20,6 +20,35 @@ include $(PGXS)
 # derive documentation
 $(name).1: $(name); pod2man --name $(name) $< > $@
 $(name).html: $(name); pod2html --title $(name) $< > $@
+
+pgsql_install: install
+pgsql_uninstall: uninstall
+
+#
+# MYSQL stuff
+#
+MY.c	= $(wildcard mysql_*.c)
+MY.so	= $(MY.c:%.c=%.so)
+MY.sql	= $(MY.c:%.c=%.sql)
+
+MY_CONFIG	= mysql_config
+MYDIR	= $(shell $(MY_CONFIG) --plugindir)/
+MYCC	= $(CC) $(shell $(MY_CONFIG) --cflags)
+
+mysql_%.so: mysql_%.c
+	$(MYCC) -shared -o $@ $<
+	chmod a+r-x $@
+
+mysql_install: $(MY.so) $(MY.sql)
+	cp -a $^ $(MYDIR)
+
+mysql_uninstall:
+	$(RM) $(addprefix $(MYDIR),$(MY.so) $(MY.sql))
+
+# cleanup
+clean: local-clean
+local-clean:
+	$(RM) *.so
 
 # development stuff is ignored by the distribution
 -include dev.mk

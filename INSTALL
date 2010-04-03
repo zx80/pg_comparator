@@ -1,27 +1,19 @@
-Postgresql 8.0 or better:
-
-Simply use the pgxs GNU makefile provided:
+Postgresql 8.0 or better, simply use the pgxs GNU makefile provided:
 
 	sh> make install
 
-You must only insure that the pg_config found in your path is the one
-of the target postgresql server.
+You must only insure that the "pg_config" found in your path is the one
+of the target postgresql server, and that development packages are installed.
 
 If you are fed up, you can remove all installed files with:
 
 	sh> make uninstall
 
+For MySQL, you need "mysql_config" and the development packages.
 
+	sh> make mysql_install
+	sh> cat mysql_*.sql | mysql <your-database>
 
-For prior versions:
+To uninstall, do:
 
-There is no reason why it should not work with other versions of PostgreSQL.
-Look at the postgresql documentation for compiling manually the C files
-into shared objects, for fixing the sql loading scripts, and for installing
-the stuff where expected.
-
-Alternativelly, you can copy all files in a contrib/pg_comparator directory
-within the PostgreSQL source tree, fix the makefile by looking at other
-contrib makefiles for defining proper macros and including some files, 
-and then make install/uninstall as above after PostgreSQL has been 
-properly configured.
+   	sh> make mysql_uninstall

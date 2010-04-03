@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: rand_table.pl 536 2010-03-21 15:53:08Z fabien $
+# $Id: rand_table.pl 647 2010-03-31 15:28:06Z fabien $
 #
 # generates a sample table
 #
@@ -15,6 +15,8 @@ my @columns = ();
 my $width = 5;
 my $key = 0;
 my $create = 1;
+my $db = 'pgsql';
+my $engine;
 
 GetOptions
   ("table|t=s" => \$table,
@@ -25,6 +27,11 @@ GetOptions
    "columns|c:s" => \@columns,
    "width|w=i" => \$width,
    "start-key|start|sk|K=i" => \$key,
+   # target database
+   "mysql" => sub { $db = 'mysql'; },
+   "pgsql" => sub { $db = 'pgsql'; },
+   "engine=s" => \$engine,
+   # help
    "help|h" => sub {
        print "$0 -t tab -s seed -r rows -c col,names -w width -k i -e\n";
        exit 0;
@@ -35,18 +42,24 @@ GetOptions
 @keys = split ',', join ',', @keys;
 @columns = split ',', join ',', @columns;
 
+die "engine option only valid under mysql"
+    if defined $engine and $db ne 'mysql';
+
 # declare table
 if ($create)
 {
   print "CREATE TABLE $table(\n  id INTEGER";
   for my $c (@keys, @columns) {
-    print ",\n  $c TEXT";
+    print ",\n  $c ", $db eq 'pgsql'? 'TEXT': 'VARCHAR(64)';
   }
-  print ",\n  PRIMARY KEY (", join(',','id',@keys),  ")\n);\n";
+  print
+      ",\n  PRIMARY KEY (", join(',','id',@keys), ")\n)",
+      $engine? "ENGINE $engine": '', ";\n";
 }
 
 # fill table
-print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n";
+print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n"
+    if $db eq 'pgsql';
 
 sub ran($)
 {
@@ -60,12 +73,21 @@ sub ran($)
 
 my $i = 0;
 while ($i++<$rows) {
+  if ($db eq 'pgsql') {
     print $key+$i;
     for my $c (@keys, @columns) {
-	print "\t", ran($width);
+      print "\t", ran($width);
     }
     print "\n";
+  }
+  elsif ($db eq 'mysql') {
+    print "INSERT INTO $table VALUES(", $key+$i;
+    for my $c (@keys, @columns) {
+      print ",'", ran($width), "'";
+    }
+    print ");\n";
+  }
 }
 
 # end fill table
-print "\\.\nANALYZE $table;\n";
+print "\\.\nANALYZE $table;\n" if $db eq 'pgsql';

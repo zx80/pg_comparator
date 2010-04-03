@@ -10,3 +10,6 @@ use as:
 	psql> SELECT cksum2('some text');
 	psql> SELECT cksum4('some text');
 	psql> SELECT cksum8('some text');
+
+An empty text results in hash value 0.
+A NULL value results in some predefined value.

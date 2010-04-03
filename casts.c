@@ -1,6 +1,6 @@
-/* $Id: casts.c 416 2008-02-14 14:45:09Z fabien $
+/* $Id: casts.c 636 2010-03-31 13:09:03Z fabien $
  *
- * some missing cast functions.
+ * additional cast functions.
  */
 
 #include "postgres.h"
@@ -14,9 +14,11 @@ PG_MODULE_MAGIC;
 
 extern Datum varbitfrombytea(PG_FUNCTION_ARGS);
 extern Datum varbittobytea(PG_FUNCTION_ARGS);
+extern Datum varbittoint2(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(varbitfrombytea);
 PG_FUNCTION_INFO_V1(varbittobytea);
+PG_FUNCTION_INFO_V1(varbittoint2);
 
 /* create a bit string from a byte array.
  */
@@ -24,14 +26,14 @@ Datum varbitfrombytea(PG_FUNCTION_ARGS)
 {
   bytea	*arg = PG_GETARG_BYTEA_P(0);
   int32	typmod = PG_GETARG_INT32(1); /* for ::BIT(10) syntax */
-  /* bool	isExplicit = PG_GETARG_BOOL(2); */
-  int		datalen = VARSIZE(arg) - VARHDRSZ;
-  int		bitlen = BITS_PER_BYTE * datalen;
-  int		len, resbitlen, resdatalen, needlen;
-  VarBit	*result;
+  /* bool isExplicit = PG_GETARG_BOOL(2); */
+  int	datalen = VARSIZE(arg) - VARHDRSZ;
+  int	bitlen = BITS_PER_BYTE * datalen;
+  int	len, resbitlen, resdatalen, needlen;
+  VarBit *result;
 
   /* truncate or expand if required */
-  if (typmod>=0) 
+  if (typmod>=0)
   {
     resbitlen = typmod;
     resdatalen = (resbitlen + BITS_PER_BYTE - 1) / BITS_PER_BYTE;
@@ -53,24 +55,24 @@ Datum varbitfrombytea(PG_FUNCTION_ARGS)
   {
     unsigned char *ptr = VARBITS(result) + needlen;
     while (needlen<resdatalen)
-      {
-	*ptr++ = '\000';
-	needlen++;
-      }
+    {
+      *ptr++ = '\000';
+      needlen++;
+    }
   }
-  
+
   PG_RETURN_VARBIT_P(result);
 }
 
 Datum varbittobytea(PG_FUNCTION_ARGS)
 {
-  VarBit	*arg = PG_GETARG_VARBIT_P(0);
+  VarBit *arg = PG_GETARG_VARBIT_P(0);
   bool	isExplicit = PG_GETARG_BOOL(2);
-  int 	bitlen = VARBITLEN(arg);
-  int 	datalen = (bitlen + BITS_PER_BYTE - 1) / BITS_PER_BYTE;
-  int 	len = datalen + VARHDRSZ;
+  int	bitlen = VARBITLEN(arg);
+  int	datalen = (bitlen + BITS_PER_BYTE - 1) / BITS_PER_BYTE;
+  int	len = datalen + VARHDRSZ;
   bytea	*result;
-  
+
   /* no implicit cast if data size is changed */
   if (!isExplicit && (bitlen != BITS_PER_BYTE*datalen))
     ereport(ERROR,
@@ -81,7 +83,26 @@ Datum varbittobytea(PG_FUNCTION_ARGS)
   result = (bytea *) palloc(len);
   SET_VARSIZE(result, len);
   memcpy(VARDATA(result), VARBITS(arg), datalen);
-  
+
   PG_RETURN_BYTEA_P(result);
 }
 
+// hmmm... I'm quite unsure about bit order and so...
+Datum varbittoint2(PG_FUNCTION_ARGS)
+{
+  VarBit *arg = PG_GETARG_VARBIT_P(0);
+  bool	isExplicit = PG_GETARG_BOOL(2);
+  int	bitlen = VARBITLEN(arg);
+  int16	result = 0;
+
+  /* no implicit cast if data size is changed */
+  if (!isExplicit &&  (bitlen != BITS_PER_BYTE*2))
+    ereport(ERROR,
+	    (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
+	     errmsg("bit length %d would be round up, use explicit cast",
+		    bitlen)));
+
+  memcpy(&result, VARBITS(arg), 2);
+
+  PG_RETURN_INT16(result);
+}
