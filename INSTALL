@@ -13,6 +13,9 @@ For MySQL, you need "mysql_config" and the development packages.
 
 	sh> make mysql_install
 	sh> cat mysql_*.sql | mysql <your-database>
+        # this requires appending "/usr/lib/mysql/plugin/* rm," 
+        # to "/etc/apparmor.d/usr.sbin.mysqld" and
+        # restarting apparmor under ubuntu.
 
 To uninstall, do:
 

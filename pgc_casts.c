@@ -1,4 +1,4 @@
-/* $Id: casts.c 636 2010-03-31 13:09:03Z fabien $
+/* $Id: pgc_casts.c 1022 2010-08-06 07:28:07Z fabien $
  *
  * additional cast functions.
  */

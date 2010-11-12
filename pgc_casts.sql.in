@@ -1,4 +1,4 @@
--- $Id: casts.sql.in 612 2010-03-30 15:11:24Z fabien $
+-- $Id: pgc_casts.sql.in 1022 2010-08-06 07:28:07Z fabien $
 
 LOAD 'MODULE_PATHNAME';
 

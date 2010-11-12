@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 631 2010-03-31 09:23:49Z fabien $
+# $Id: test_pg_comparator.sh 989 2010-08-03 07:53:57Z fabien $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost -- \
@@ -9,12 +9,19 @@
 PATH=$PATH:.
 
 # default values
-rows=1001 name=foo seed=1 width=5 nkey=0 ncol=2 base=$USER auth= keep= cmp=1
+rows=1000 name=foo seed=1 width=5 nkey=0 ncol=2 base=$USER
+
+# operations to perform
+create= modify= cmp=
+
+# misc
+auth= keep= eng= debug=
 
 # default diffs
 upt=2 ins=2 del=2 nul=2 rev=1 total=
 
-while getopts "1:2:s:r:n:w:a:b:k:c:u:i:d:l:v:t:KNh" opt
+# handle options
+while getopts "1:2:s:r:n:w:a:b:k:c:u:i:d:l:e:v:t:DKCMRh" opt
 do
   case $opt in
     # connection
@@ -29,6 +36,7 @@ do
     k) nkey=$OPTARG ;;
     c) ncol=$OPTARG ;;
     w) width=$OPTARG ;; # about 17 chars per w
+    e) eng=$OPTARG ;;
     # diffs
     t) total=$OPTARG ;;
     u) upt=$OPTARG ;;
@@ -38,7 +46,11 @@ do
     v) rev=$OPTARG ;;
     # cleanup
     K) keep=1 ;;
-    N) cmp= ;;
+    D) debug=1 ;;
+    # ops
+    C) create=1 ;;
+    M) modify=1 ;;
+    R) cmp=1 ;;
     # help
     h|*)
       echo -e \
@@ -53,7 +65,9 @@ do
 	" -w width: horizontal size (17 chars per unit)\n" \
 	" -t total: number of differences to generate\n" \
         " -K: keep resulting table\n" \
-        " -N: do not compare"
+        " -C: create\n" \
+	" -M: modify\n" \
+	" -R: run"
       exit 1
       ;;
   esac
@@ -63,13 +77,16 @@ shift $(( $OPTIND - 1 ))
 
 # if total is set, share upt/ins/del/nul/rev to match it
 if [ "$total" ] ; then
-  ins=$(($total/4))
-  nul=$ins
-  upt=$ins
-  rev=0
-  # fix if key only, no updates
-  [ $ncol -eq 0 ] && upt=0 rev=0 nul=0
-  del=$(($total - $ins - $upt - $rev - $nul))
+  if [ $ncol -eq 0 ] ; then
+    # fix if key only, no updates!
+    ins=$(($total/2))
+    nul=0 upt=0 rev=0
+    del=$(($total-$ins))
+  else
+    ins=$(($total/4))
+    del=$ins nul=$ins rev=0
+    upt=$(($total - $ins - $del - $rev - $nul))
+  fi
 else
   # fix if key only, no updates
   [ $ncol -eq 0 ] && upt=0 rev=0 nul=0
@@ -111,54 +128,87 @@ col2=${col2#,}
 
 echo "BUILD size=$rows name=$name seed=$seed width=$width $(date)"
 
+# generate table creation
 function create_table()
 {
   #echo "$@" >&2
-  local db=$1 name=$2 nb=$3 seed=$4 rows=$5 keys=$6 cols=$7 width=$8 \
-      total=$9 upt=${10} ins=${11} del=${12} nul=${13} rev=${14}
-  shift 14
+  local db=$1 name=$2 seed=$3 rows=$4 keys=$5 cols=$6 width=$7 eng=$8
+  shift 8
+
+  local engine=
+  [ $db = 'mysql' -a "$eng" ] && engine="--engine $eng"
 
   echo "BEGIN;"
 
   # create and fill tables
-  echo "DROP TABLE IF EXISTS ${name}${nb};"
+  echo "DROP TABLE IF EXISTS ${name};"
 
-  rand_table.pl --$db --table ${name}${nb} --seed $seed --rows $rows \
-	--keys=$keys --columns=$cols --width $width
+  rand_table.pl --$db --table ${name} --seed $seed --rows $rows \
+	--keys=$keys --columns=$cols --width $width $engine
 
+  echo "COMMIT;"
+
+  [ $db = 'pgsql' ] && echo "VACUUM FULL ANALYZE ${name};"
+}
+
+# generate specified table modifications
+function change_table()
+{
+  local db=$1 name=$2 ncol=$3 rows=$4 keys=$5 cols=$6 \
+      upt=$7 ins=$8 del=$9 nul=${10} rev=${11}
+  shift 11
+
+  local total=$(($upt + $ins + $del + $nul + $rev))
   local i=1 c=0 div=$(($total+1))
+
+  local kc=''
+  [ "$keys" ] && kc=",$keys"
+  if [ "$cols" ] ; then
+    if [ "$kc" ] ; then
+      kc+=",$cols";
+    else
+      kc=",$cols";
+    fi
+  fi
+
+  echo "BEGIN;"
+
   while [ $i -le $total ]
   do
     local id=$(($rows*$i/$div))
     #echo "id=$id" >&2
     if [[ $upt -ne 0 ]] ; then
       let upt-- c=++$c%$ncol
-      [ $nb = 1 ] && echo "UPDATE ${name}1 SET a$c='bouh' WHERE id=$id;"
+      [ "$debug" ] && { echo "# update id=$id" >> debug.out ; }
+      echo "UPDATE $name SET b$c='bouh' WHERE id=$id;"
+    elif [[ $del -ne 0 ]] ; then
+      local nid=$(($rows+$del))
+      let del--
+      [ "$debug" ] && { echo "# delete id=$nid" >> debug.out ; }
+      echo "INSERT INTO $name(id$kc)"
+      echo "SELECT $nid$kc FROM $name WHERE id=$id;"
     elif [[ $ins -ne 0 ]] ; then
       let ins--
-      [ $nb = 2 ] && echo "DELETE FROM ${name}2 WHERE id=$id;"
-    elif [[ $del -ne 0 ]] ; then
-      let del--
-      [ $nb = 1 ] && echo "DELETE FROM ${name}1 WHERE id=$id;"
+      [ "$debug" ] && { echo "# insert id=$id" >> debug.out ; }
+      echo "DELETE FROM $name WHERE id=$id;"
     elif [[ $nul -ne 0 ]] ; then
       let nul-- c=++$c%$ncol
-      [ $nb = 1 ] && echo "UPDATE ${name}1 SET a$c=NULL WHERE id=$id;"
+      [ "$debug" ] && { echo "# null id=$id" >> debug.out ; }
+      echo "UPDATE $name SET b$c=NULL WHERE id=$id;"
     elif [[ $rev -ne 0 ]] ; then
       let rev--
-      [ $nb = 1 ] && {
-        #echo "id2=$id2" >&2
-        id2=$(($id + 1))
-        echo "UPDATE ${name}1 SET id=0 WHERE id=$id;"
-        echo "UPDATE ${name}1 SET id=$id WHERE id=$id2;"
-        echo "UPDATE ${name}1 SET id=$id2 WHERE id=0;"
-      }
+      id2=$(($id + 1))
+      [ "$debug" ] && { echo "# reverse id=$id id2=$id2" >> debug.out ; }
+      echo "UPDATE $name SET id=0 WHERE id=$id;"
+      echo "UPDATE $name SET id=$id WHERE id=$id2;"
+      echo "UPDATE $name SET id=$id2 WHERE id=0;"
     fi
     let i++
   done
 
   echo "COMMIT;"
 
-  [ $db = 'pgsql' ] && echo "ANALYZE ${name}${nb};"
+  [ $db = 'pgsql' ] && echo "VACUUM FULL ANALYZE ${name};"
 }
 
 # pgsql://calvin:hobbes@host
@@ -190,25 +240,34 @@ sql2=$(parse_conn $auth2 $base)
 [[ "$sql2" == psql* ]] && db2=pgsql || db2=mysql
 #echo "sql2=$sql2 db2=$db2"
 
-# create and fill tables
-create_table $db1 $name 1 $seed $rows "$key1" "$col1" $width \
-    $total $upt $ins $del $nul $rev | eval $sql1
+[ "$create" ] &&
+{
+  # create and fill tables
+  create_table $db1 ${name}1 $seed $rows "$key1" "$col1" $width $eng | \
+      eval $sql1 &
+  wait=$!
+  create_table $db2 ${name}2 $seed $rows "$key2" "$col2" $width $eng | \
+      eval $sql2
+}
 
-create_table $db2 $name 2 $seed $rows "$key2" "$col2" $width \
-    $total $upt $ins $del $nul $rev | eval $sql2
-
-[ "$1" = 'load' ] && exit
-
-if [ $nkey -gt 0 ] ; then
-  key1="id,$key1" key2="id,$key2"
-else
-  key1='id' key2='id'
-fi
+[ "$modify" ] &&
+{
+  # modify the second table
+  change_table $db2 ${name}2 $ncol $rows "$key2" "$col2" \
+      $upt $ins $del $nul $rev | eval $sql2
+}
 
 echo "EXPECTING $msg"
 
+[ "$wait" ] && wait $wait
+
 status=0
 if [ "$cmp" ] ; then
+  if [ $nkey -gt 0 ] ; then
+    key1="id,$key1" key2="id,$key2"
+  else
+    key1='id' key2='id'
+  fi
   echo "COMPARE $(date)"
   # use implicit authority in second connection
   echo pg_comparator -e $expect "$@" \

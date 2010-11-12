@@ -1,4 +1,4 @@
--- $Id: checksum.sql.in 247 2005-03-13 09:31:52Z coelho $
+-- $Id: pgc_checksum.sql.in 1022 2010-08-06 07:28:07Z fabien $
 
 LOAD 'MODULE_PATHNAME';
 

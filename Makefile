@@ -1,10 +1,10 @@
-# $Id: Makefile 700 2010-04-03 14:06:36Z fabien $
+# $Id: Makefile 1022 2010-08-06 07:28:07Z fabien $
 
 name		= pg_comparator
 
 SCRIPTS		= $(name)
-MODULES		= checksum casts
-DATA_built	= checksum.sql casts.sql
+MODULES		= pgc_checksum pgc_casts
+DATA_built	= $(MODULES:%=%.sql)
 DATA		= xor_aggregate.sql
 DOCS		= README.$(name) \
 		  README.xor_aggregate \
@@ -40,6 +40,7 @@ mysql_%.so: mysql_%.c
 	chmod a+r-x $@
 
 mysql_install: $(MY.so) $(MY.sql)
+	chmod a+r $(MY.sql)
 	cp -a $^ $(MYDIR)
 
 mysql_uninstall:

@@ -1,4 +1,4 @@
-/* $Id: checksum.c 685 2010-04-03 11:50:28Z fabien $
+/* $Id: pgc_checksum.c 1022 2010-08-06 07:28:07Z fabien $
  *
  * This function computes a simple and fast checksum of a text.
  * It is unclear to me what happends on different encodings.

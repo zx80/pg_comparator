@@ -1,4 +1,4 @@
-/* $Id: mysql_casts.c 674 2010-04-03 08:59:27Z fabien $ */
+/* $Id: mysql_casts.c 779 2010-07-13 13:56:04Z fabien $ */
 
 // minimal headers
 #include <stdint.h>
@@ -12,8 +12,6 @@ my_bool biginttoint4_init(UDF_INIT *, UDF_ARGS *, char *);
 longlong biginttoint4(UDF_INIT *, UDF_ARGS *, char *, char *);
 my_bool biginttoint2_init(UDF_INIT *, UDF_ARGS *, char *);
 longlong biginttoint2(UDF_INIT *, UDF_ARGS *, char *, char *);
-
-/* This function returns the sum of all arguments */
 
 longlong biginttoint8(
   UDF_INIT *initid __attribute__((unused)),

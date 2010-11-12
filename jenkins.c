@@ -1,4 +1,4 @@
-/* $Id: jenkins.c 737 2010-04-05 08:13:18Z fabien $ */
+/* $Id: jenkins.c 901 2010-07-27 10:11:24Z fabien $ */
 
 #include <stdint.h>
 
@@ -38,6 +38,7 @@ static int16_t checksum_int2(unsigned char *data, size_t size)
   return (int16_t) ((h>>16)^h);
 }
 
+// many collision, eg cksum4('16667') = cksum4('53827') 
 static int32_t checksum_int4(unsigned char *data, size_t size)
 {
   uint32_t h = PN_32_1;

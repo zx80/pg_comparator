@@ -3,7 +3,7 @@ for TEXT, results being of INT2, INT4 and INT8 types.
 
 load with:
 
-	sh> psql < <path-to-postgresql>/share/contrib/checksum.sql
+	sh> psql < <path-to-postgresql>/share/contrib/pgc_checksum.sql
 
 use as:
 

@@ -1,4 +1,7 @@
-# $Id: test.mk 744 2010-04-05 19:34:33Z fabien $
+# $Id: test.mk 986 2010-08-02 19:35:38Z fabien $
+
+# make AUTH=pgsql://login:password@localhost \
+#      PGCO2='--stats-name=test --stats=csv'  test_fast_pgsql
 
 SHELL	= /bin/bash
 
@@ -21,6 +24,7 @@ CF	= ck
 CS	= 8
 
 # other options
+ENG	= INNODB
 PGCOPTS	=
 PGCO2	=
 
@@ -41,21 +45,35 @@ AUTH2	= $(AUTH)
 CONN1	= $(AUTH1)/$(DB)/foo1?$(key1):$(col1)
 CONN2	= $(AUTH2)/$(DB)/foo2?$(key2):$(col2)
 
-# make AUTH=calvin:hobbes@home DB=calvin COLS=0 ROWS=1000 check
-test_run: $(name)
-	# generate test tables and perform one comparison
+DIFFS	= -t $(TOTAL)
+
+PG_PRE	= :
+PG_POST	= :
+
+RUNOPS	= -C -M -K
+
+run:
 	./test_pg_comparator.sh \
 		-1 $(AUTH1) -2 $(AUTH2) -b $(DB) \
 		-k $(KEYS) -c $(COLS) -r $(ROWS) -w $(WIDTH) \
-		-t $(TOTAL) -K -- \
-		-f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) --null=$(NULL) \
-		$(PGCOPTS) $(PGCO2)
-	# synchronize
+		$(DIFFS) -e $(ENG) $(RUNOPS)
+
+# make AUTH=calvin:hobbes@home DB=calvin COLS=0 ROWS=1000 test_run
+test_run:
+	$(MAKE) run
+	# pre-settings
+	$(PG_PRE)
+	# first comparison
+	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
+		--null=$(NULL) -e $(TOTAL) $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
+	# comparison & synchronize
 	time ./pg_comparator -S -D -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
 		--null=$(NULL) -e $(TOTAL) $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
 	# check that synchronization was okay
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
 		--null=$(NULL) -e 0 $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
+	# post-settings
+	$(PG_POST)
 
 #
 # SLOW COMBINATORIAL VALIDATION
@@ -133,7 +151,7 @@ test_fast:
 test_fast_mysql: test_fast
 test_fast_pgsql: test_fast
 test_fast_mixed:
-	$(MAKE) AUTH2=$(AUTH1) AUTH1=$(AUTH2) test_fast
+	$(MAKE) AUTH1=$(AUTH1) AUTH2=$(AUTH2) test_fast
 	$(MAKE) AUTH1=$(AUTH2) AUTH2=$(AUTH1) test_fast
 
 #
