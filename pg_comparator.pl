@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 1063 2010-11-12 17:08:14Z fabien $
+# $Id: pg_comparator.pl 1102 2011-09-07 10:00:04Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -146,10 +146,11 @@ Name prefix for comparison tables. May be schema-qualified.
 
 Report keys as they are found. Default is to report.
 
-=item C<--separator=:> or C<-s :>
+=item C<--separator=%> or C<-s %>
 
 Separator string or character when concatenating key columns.
-This character should not appear in the values.
+This character should not appear in any values.
+Defaults to the percent '%' character.
 
 =item C<--temporary>, C<--no-temporary>
 
@@ -209,7 +210,7 @@ Be verbose about what is happening. The more you ask, the more verbose.
 
 =item C<--version>
 
-Show version information.
+Show version information and exit.
 
 =item C<--where=...>
 
@@ -592,9 +593,23 @@ There is a special management of large chunks of deletes or inserts
 which is implemented although not detailed in the algorithmic overview
 and complexity analysis.
 
+There is some efforts to build a PostgreSQL/MySQL compatible implementation
+of the algorithm, which added hacks to deal with type conversions and other
+stuff.
+
 =head2 REFERENCES
 
-This script and algorithm was inspired by:
+A paper was presented at a conference about this tool and its algorithm.
+
+I<Remote Comparison of Database Tables> by Fabien Coelho,
+In Third International Conference on
+Advances in Databases, Knowledge, and Data Applications (DBKDA),
+pp 23-28, St Marteen, The Netherlands Antilles, January 2011.
+ISBN: 978-1-61208-002-4.
+Copyright IARIA 2011.
+Online at L<http://www.thinkmind.org/index.php?view=article&articleid=dbkda_2011_2_10_30021>.
+
+The algorithm and script was inspired by:
 
 =over 2
 
@@ -642,6 +657,10 @@ this one.
 Some products or projects implement such features, for instance:
 L<http://code.google.com/p/maatkit/> (mk-table-sync, by I<Baron Schwartz>,
 see L<http://tinyurl.com/mysql-data-diff-algorithm>)
+(formerly L<http://sourceforge.net/projects/mysqltoolkit>).
+
+Some more links:
+L<http://www.altova.com/databasespy/>
 L<http://www.citrustechnology.com/solutions/data-comparison>
 L<http://comparezilla.sourceforge.net/>
 L<http://www.dbbalance.com/db_comparison.htm>
@@ -649,9 +668,10 @@ L<http://www.dbsolo.com/datacomp.html>
 L<http://www.devart.com/dbforge/sql/datacompare/>
 L<http://www.dkgas.com/dbdiff.htm>
 L<http://www.programurl.com/software/sql-server-comparison.htm>
+L<http://www.red-gate.com/products/sql-development/sql-data-compare/>
 L<http://www.sql-server-tool.com/>
-L<http://sourceforge.net/projects/mysqltoolkit>
 L<http://www.webyog.com/>
+L<http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>
 
 =head1 BUGS
 
@@ -675,6 +695,9 @@ The script handles one table at a time. In order to synchronize
 several linked tables, you must disable referential integrity checks,
 then synchronize each tables, then re-enable the checks.
 
+If the separator character appears within a value, the scripts fails in
+some ugly and unclear way while synchronizing.
+
 =head1 VERSIONS
 
 See L<http://pgfoundry.org/projects/pg-comparator/> for the latest version.
@@ -683,6 +706,12 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 =over 4
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
+
+Change default separator to '%', which seems less likely,
+after issues run into by I<Emanuel Calvo>.
+Add more pointers and documentation.
+
+=item B<version 1.7.0> 2010-11-12 (r1063)
 
 Improved documentation.
 Enhancement and fix by I<Maxim Beloivanenko>: handle quoted table and
@@ -809,7 +838,7 @@ use Getopt::Long qw(:config no_ignore_case);
 use DBI;
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1063 $';
+my $revision = '$Revision: 1102 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -826,7 +855,7 @@ my ($where, $expect);
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
-my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'xor', ':');
+my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'xor', '%');
 
 
 ######################################################################### UTILS
@@ -1017,7 +1046,7 @@ sub build_conn($$$$$$)
   return $dbh;
 }
 
-# global counter
+# global counters
 my $query_nb = 0;   # number of queries
 my $query_sz = 0;   # size of queries
 my $query_fr = 0;   # fetched summary rows
@@ -1353,6 +1382,8 @@ sub compute_checksum($$$$$$$$)
   sql_do($dbh, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
   # ??? CREATE + INSERT SELECT to get row count?
   # would also allow to choose better types (int2/int4/int8...)?
+  # ??? What about using quoted strings or using an array for values?
+  # what would be the impact on the cksum? on pg/my compatibility?
   sql_do($dbh,
 	 "CREATE ${temp}TABLE ${name}0 AS " .
 	 "SELECT " .
@@ -1643,7 +1674,7 @@ GetOptions(
   "statistics|stats:s" => \$stats,
   "stats-name=s" => \$name, # name of test
   # misc
-  "version|V" => sub { print "$0 version is $script_version\n"; }
+  "version|V" => sub { print "$0 version is $script_version\n"; exit 0; }
 ) or die "$! (try $0 --help)";
 
 $max_report = $expect if defined $expect and not defined $max_report;
