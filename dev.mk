@@ -1,4 +1,4 @@
-# $Id: dev.mk 701 2010-04-03 14:10:17Z fabien $
+# $Id: dev.mk 1109 2012-03-24 14:13:27Z fabien $
 
 # script distribution
 dir	= $(name)
@@ -25,9 +25,11 @@ $(name): $(name).pl
 %: %.src
 	sed -e's/@VERSION@/$(VERSION)/g;s/@YEAR@/$(YEAR)/g' $< > $@
 
-tar: $(name)-$(VERSION).tgz
+tgz: $(name)-$(VERSION).tgz
 
-# for a new version, do make version=1.5.3 publish in the .. directory
+# for a new version, do make VERSION=1.5.3 publish in the .. directory
+# then edit pg_comparator.pl file to fix the version as well?
+# keep a copy of the targz in ~/SAVE/SOFTS/
 $(name)-$(VERSION).tgz: $(F.dist)
 	ln -s . $(name)-$(VERSION) ; \
 	tar czf $@ $(addprefix $(name)-$(VERSION)/, $(F.dist)) ; \

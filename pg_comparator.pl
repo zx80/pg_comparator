@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 1102 2011-09-07 10:00:04Z fabien $
+# $Id: pg_comparator.pl 1107 2012-03-24 14:09:58Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -707,6 +707,11 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
+Change default separator to '|'.
+Fix "where" option mishandling when counting, pointed out by I<Enrique Corona>.
+
+=item B<version 1.8.0> 2012-01-08 (r1102)
+
 Change default separator to '%', which seems less likely,
 after issues run into by I<Emanuel Calvo>.
 Add more pointers and documentation.
@@ -838,7 +843,7 @@ use Getopt::Long qw(:config no_ignore_case);
 use DBI;
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1102 $';
+my $revision = '$Revision: 1107 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -855,7 +860,7 @@ my ($where, $expect);
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
-my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'xor', '%');
+my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'xor', '|');
 
 
 ######################################################################### UTILS
@@ -1193,7 +1198,7 @@ sub col_is_not_null($$$)
 sub count($$)
 {
   my ($dbh, $table) = @_;
-  my $q = "SELECT COUNT(*) FROM $table".(defined $where? " WHERE $where": '');
+  my $q = "SELECT COUNT(*) FROM $table";
   $query_nb++;
   $query_sz += length($q);
   return $dbh->selectrow_array($q);
