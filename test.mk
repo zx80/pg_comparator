@@ -1,4 +1,4 @@
-# $Id: test.mk 986 2010-08-02 19:35:38Z fabien $
+# $Id: test.mk 1115 2012-08-07 21:06:25Z fabien $
 
 # make AUTH=pgsql://login:password@localhost \
 #      PGCO2='--stats-name=test --stats=csv'  test_fast_pgsql
@@ -65,13 +65,13 @@ test_run:
 	$(PG_PRE)
 	# first comparison
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
-		--null=$(NULL) -e $(TOTAL) $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
+	    --null=$(NULL) -e $(TOTAL) $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
 	# comparison & synchronize
 	time ./pg_comparator -S -D -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
-		--null=$(NULL) -e $(TOTAL) $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
+	    --null=$(NULL) -e $(TOTAL) $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
 	# check that synchronization was okay
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
-		--null=$(NULL) -e 0 $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
+	    --null=$(NULL) -e 0 $(PGCOPTS) $(PGCO2) $(CONN1) $(CONN2)
 	# post-settings
 	$(PG_POST)
 

@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# $Id: pg_comparator.pl 1107 2012-03-24 14:09:58Z fabien $
+# $Id: pg_comparator.pl 1117 2012-08-07 21:14:09Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -105,6 +105,11 @@ choice for most settings.
 
 Show short help.
 
+=item C<--long-read-len=0> or <-L 0>
+
+Set max size for fetched binary large objects.
+Default is to keep the default value set by the driver.
+
 =item C<--man> or C<-m>
 
 Show manual page.
@@ -146,11 +151,11 @@ Name prefix for comparison tables. May be schema-qualified.
 
 Report keys as they are found. Default is to report.
 
-=item C<--separator=%> or C<-s %>
+=item C<--separator='|'> or C<-s '|'>
 
 Separator string or character when concatenating key columns.
 This character should not appear in any values.
-Defaults to the percent '%' character.
+Defaults to the pipe '|' character.
 
 =item C<--temporary>, C<--no-temporary>
 
@@ -690,6 +695,8 @@ Although the algorithm can work with some normalized columns
 the implementation may not work at all.
 
 Tables with binary keys or with NULL in keys may not work.
+Synchronizing tables with large object attributes may fail and result in
+strange error messages.
 
 The script handles one table at a time. In order to synchronize
 several linked tables, you must disable referential integrity checks,
@@ -707,7 +714,17 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
-Change default separator to '|'.
+Minor documentation improvements and fixes.
+Bug fix in the merge procedure by I<Robert Coup> that could result in
+some strange difference reports in corner cases.
+Fix broken synchronization with '|' separator, raised by I<Aldemir Akpinar>.
+Warn about possible issues with large objects. Add --long-read-len option as
+a possible way to circumvent such issues. Try to detect these issues.
+Add a counter for metadata queries.
+
+=item B<version 1.8.1> 2012-03-24 (r1109)
+
+Change default separator again, to '|'.
 Fix "where" option mishandling when counting, pointed out by I<Enrique Corona>.
 
 =item B<version 1.8.0> 2012-01-08 (r1102)
@@ -843,7 +860,7 @@ use Getopt::Long qw(:config no_ignore_case);
 use DBI;
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1107 $';
+my $revision = '$Revision: 1117 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -857,6 +874,7 @@ my $prefix = 'cmp';
 my ($maskleft) = 1;
 my ($stats, $name, $key_size, $col_size) = (undef, 'none', 0, 0);
 my ($where, $expect);
+my ($longreadlen); # max size of blobs...
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
@@ -1047,16 +1065,21 @@ sub build_conn($$$$$$)
   my ($db, $b, $h, $p, $u, $w) = @_;
   verb 2, "connecting...";
   my $dbh = conn($db, $b, $h, $p, $u, $w);
+  # max length of blobs to fetch
+  $dbh->{LongReadLen} = $longreadlen if defined $longreadlen;
+  $dbh->{LongTruncOk} = 0;
+  # back to serialized form for threads
   dbh_serialize($dbh, $db);
   return $dbh;
 }
 
-# global counters
+# global counters for the report
 my $query_nb = 0;   # number of queries
 my $query_sz = 0;   # size of queries
 my $query_fr = 0;   # fetched summary rows
 my $query_fr0 = 0;  # fetched checksum rows
 my $query_data = 0; # fetched data rows for synchronizing
+my $query_meta = 0; # special queries to metadata
 
 # sql_do($dbh, $query)
 # execute an SQL query on a database
@@ -1071,18 +1094,16 @@ sub sql_do($$)
 }
 
 # execute a parametric statement with col & key values
-sub sth_param_exec($$$@)
+sub sth_param_exec($$$$@)
 {
-  my ($doit, $sth, $keys, @cols) = @_;
+  my ($doit, $what, $sth, $keys, @cols) = @_;
   my $verbose = $verb>2;
   my $index = 1;
-  print STDERR '### binding ' if $verbose;
+  print STDERR "### $what(@cols,[$sep/$keys])\n" if $verbose;
   # ??? $sth->execute(@cols, split(/$sep/, $keys));
-  for my $val (@cols, split(/$sep/, $keys)) {
+  for my $val (@cols, split(/[$sep]/, $keys)) {
     $sth->bind_param($index++, $val) if $doit;
-    print STDERR $dbh1->quote($val), ', ' if $verbose;
   }
-  print STDERR "\n" if $verbose;
   $sth->execute() if $doit;
 }
 
@@ -1145,11 +1166,11 @@ sub table_id($$)
 }
 
 # get all attribute names, possibly ignoring a set of columns
-# beware, this query is not counted.
 sub get_table_attributes($$$$@)
 {
   my ($dbh, $db, $base, $table, @ignore) = @_;
   dbh_materialize($dbh, $db);
+  $query_meta++;
   my $sth = $dbh->column_info($base, table_id($db,$table), '%');
   my ($row, %cols);
   while ($row = $sth->fetchrow_hashref()) {
@@ -1168,13 +1189,13 @@ sub get_table_pkey($$$$)
 {
   my ($dbh, $db, $base, $table) = @_;
   dbh_materialize($dbh, $db);
+  $query_meta++;
   my @keys = $dbh->primary_key($base, table_id($db, $table));
   dbh_serialize($dbh, $db);
   return @keys;
 }
 
 # tell whether a column is declared NOT NULL
-# this query is *not* counted.
 my %not_nul_col = ();
 
 sub col_is_not_null($$$)
@@ -1185,6 +1206,7 @@ sub col_is_not_null($$$)
   return $main::not_null_col{"$dhpbt/$col"}
     if exists $main::not_null_col{"$dhpbt/$col"};
   # else get information
+  $query_meta++;
   my $sth =
       $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
   my $h = $sth->fetchrow_hashref();
@@ -1554,8 +1576,7 @@ sub differences($$$$$$@)
 	unless @r2 or not $s2->{Active};
       last unless @r1 or @r2;
       # else both lists are defined, some merging to do
-
-      if (@r1 && @r2 && $r1[0]==$r2[0] && ($level || $r1[2] eq $r1[2]))
+      if (@r1 && @r2 && $r1[0]==$r2[0] && ($level || $r1[2] eq $r2[2]))
       {
 	# matching idc (and "id" if at level 0)
 	if ($r1[1] ne $r2[1]) { # but non matching checksums
@@ -1635,7 +1656,7 @@ GetOptions(
   # verbosity
   "verbose|v+" => \$verb,
   "debug|d" => \$debug,
-  # parametrization
+  # parametrization of the algorithm
   "checksum-function|checksum|cf|c=s" => \$checksum,
   "checksum-size|check-size|checksize|cs|z=i" => \$checksize,
   "aggregate-function|aggregate|agg|af|a=s" => \$agg,
@@ -1679,6 +1700,7 @@ GetOptions(
   "statistics|stats:s" => \$stats,
   "stats-name=s" => \$name, # name of test
   # misc
+  "long-read-len|lrl|L=i" => \$longreadlen,
   "version|V" => sub { print "$0 version is $script_version\n"; exit 0; }
 ) or die "$! (try $0 --help)";
 
@@ -1776,7 +1798,7 @@ if ($ask_pass and not defined $w2)
   $w2 = Term::ReadPassword::read_password('connection 2 password> ');
 }
 
-# some more checks
+# some more sanity checks
 
 die "sorry, 'xor' aggregate does not work for mixed comparison"
     if not $debug and $db1 ne $db2 and $agg eq 'xor';
@@ -2035,7 +2057,7 @@ if ($synchronize and
     verb 2, $del_sql;
     my $del_sth = $dbh2->prepare($del_sql) if $do_it;
     for my $d (@$del, @$delb) {
-      sth_param_exec($do_it, $del_sth, $d);
+      sth_param_exec($do_it, "DELETE $t2", $del_sth, $d);
     }
     # undef $del_sth;
   }
@@ -2061,9 +2083,19 @@ if ($synchronize and
     my $ins_sth = $dbh2->prepare($ins_sql) if $do_it;
     for my $i (@$ins, @$insb)
     {
-      $query_data++, sth_param_exec(1, $val_sth, $i) if $c1 and @$c1;
-      sth_param_exec($do_it, $ins_sth, $i,
-		     ($c1 and @$c1) ? $val_sth->fetchrow_array(): ());
+      $query_data++;
+      my @c1values = ();
+      # query the other column values for key $i
+      if ($c1 and @$c1)
+      {
+	sth_param_exec(1, "SELECT $t1", $val_sth, $i);
+	@c1values = $val_sth->fetchrow_array();
+	# hmmm... may be raised on blobs?
+	die "unexpected values fetched for insert"
+	  unless @c1values and @c1values == @$c1;
+      }
+      # then insert the missing tuple
+      sth_param_exec($do_it, "INSERT $t2", $ins_sth, $i, @c1values);
     }
     #  $ins_sth
   }
@@ -2076,10 +2108,17 @@ if ($synchronize and
 	($where? "$where AND ": '') . $where_k2;
     verb 2, $upt_sql;
     my $upt_sth = $dbh2->prepare($upt_sql) if $do_it;
-    for my $u (@$upt) {
+    for my $u (@$upt)
+    {
       $query_data++;
-      sth_param_exec(1, $val_sth, $u);
-      sth_param_exec($do_it, $upt_sth, $u, $val_sth->fetchrow_array());
+      # get value for key $u
+      sth_param_exec(1, "SELECT $t1", $val_sth, $u);
+      my @c1values = $val_sth->fetchrow_array();
+      # hmmm... may be raised on blobs?
+      die "unexpected values fetched for update"
+        unless @c1values and @c1values == @$c1;
+      # use it to update the other table
+      sth_param_exec($do_it, "UPDATE $t2", $upt_sth, $u, @c1values);
     }
     # $upt_sth
   }
@@ -2198,13 +2237,13 @@ if (defined $stats)
       sprintf "%04d-%02d-%02d %02d:%02d:%02d",
 	1900+$y0, 1+$mo0, $d0, $h0, $m0, $s0;
 
-    # output CSV result
+    # output CSV result, for a machine
     print "$name,$size,$db1,$db2,$count,",
       (defined $expect? $expect: -1),
       ",$key_size,$col_size,$revision,$factor,",
       scalar @masks, ",$checksum,$checksize,",
       "$agg,$options,",
-      "$query_nb,$query_sz,$query_fr,$query_fr0,$query_data,",
+      "$query_nb,$query_sz,$query_fr,$query_fr0,$query_data,$query_meta,",
       delay($t0, $tcks), ",",
       delay($tcks, $tsum), ",",
       delay($tsum, $tmer), ",",
@@ -2215,6 +2254,7 @@ if (defined $stats)
   }
   else
   {
+    # print stats for a human being.
     print
       "      revision: $revision\n",
       "       testing: $db1/$db2\n",
@@ -2226,6 +2266,7 @@ if (defined $stats)
       "  fetched sums: $query_fr\n",
       "  fetched chks: $query_fr0\n",
       "  fetched data: $query_data\n",
+      "query metadata: $query_meta\n",
       "      key size: $key_size\n",
       "      col size: $col_size\n",
       "   diffs found: $count\n",
