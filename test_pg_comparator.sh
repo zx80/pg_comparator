@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 989 2010-08-03 07:53:57Z fabien $
+# $Id: test_pg_comparator.sh 1142 2012-08-09 12:23:32Z fabien $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost -- \
@@ -211,7 +211,7 @@ function change_table()
   [ $db = 'pgsql' ] && echo "VACUUM FULL ANALYZE ${name};"
 }
 
-# pgsql://calvin:hobbes@host
+# pgsql://calvin:hobbes@[host]
 function parse_conn()
 {
   local auth=$1 base=$2
@@ -222,10 +222,18 @@ function parse_conn()
   pass=${pass//*:/}
   if [[ $auth == pgsql://* ]]
   then
-    echo "psql 'host=$host user=$user password=$pass dbname=$base'"
+    if [ "$host" ] ; then
+      echo "psql 'host=$host user=$user password=$pass dbname=$base'"
+    else
+      echo "psql 'user=$user password=$pass dbname=$base'"
+    fi
   elif [[ $auth == mysql://* ]]
   then
-    echo "mysql --host=$host --user=$user --pass=$pass --database=$base"
+    if [ "$host" ] ; then
+      echo "mysql --host=$host --user=$user --pass=$pass --database=$base"
+    else
+      echo "mysql --user=$user --pass=$pass --database=$base"
+    fi
   else
     echo "invalid authority $auth" >&2
     exit 1

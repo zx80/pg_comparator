@@ -1,4 +1,8 @@
-# $Id: Makefile 1022 2010-08-06 07:28:07Z fabien $
+# $Id: Makefile 1128 2012-08-08 07:53:42Z fabien $
+
+#
+# PostgreSQL stuff
+#
 
 name		= pg_comparator
 
@@ -25,7 +29,7 @@ pgsql_install: install
 pgsql_uninstall: uninstall
 
 #
-# MYSQL stuff
+# MySQL stuff
 #
 MY.c	= $(wildcard mysql_*.c)
 MY.so	= $(MY.c:%.c=%.so)
@@ -46,10 +50,14 @@ mysql_install: $(MY.so) $(MY.sql)
 mysql_uninstall:
 	$(RM) $(addprefix $(MYDIR),$(MY.so) $(MY.sql))
 
-# cleanup
+#
+# common cleanup
+#
 clean: local-clean
 local-clean:
 	$(RM) *.so
 
+#
 # development stuff is ignored by the distribution
+#
 -include dev.mk

@@ -1,6 +1,6 @@
-#! /usr/bin/perl -w
+#! /usr/bin/perl
 #
-# $Id: pg_comparator.pl 1117 2012-08-07 21:14:09Z fabien $
+# $Id: pg_comparator.pl 1148 2012-08-09 12:49:41Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -59,6 +59,13 @@ perform well that this size is in the order of magnitude of the actual table
 size.
 Default is to query the table sizes, which is skipped if this option is set.
 
+=item C<--asynchronous> or C<-A>, C<--no-asynchronous> or C<-X>
+
+Whether to run asynchronous queries.
+This provides some parallelism, however the two connections are more or less
+synchronized per query.
+Default is to use asynchronous queries.
+
 =item C<--checksum-function=fun> or C<--cf=fun> or C<-c fun>
 
 Checksum function to use. Must be B<ck> or B<md5>. Default is B<ck>, which
@@ -105,10 +112,11 @@ choice for most settings.
 
 Show short help.
 
-=item C<--long-read-len=0> or <-L 0>
+=item C<--long-read-len=0> or C<-L 0>
 
 Set max size for fetched binary large objects.
 Default is to keep the default value set by the driver.
+Well, it seems to be ignored at least by the PostgreSQL driver.
 
 =item C<--man> or C<-m>
 
@@ -159,22 +167,27 @@ Defaults to the pipe '|' character.
 
 =item C<--temporary>, C<--no-temporary>
 
-Whether to use temporary tables. Default is to use.
+Whether to use temporary tables. Default is to use them.
 If you don't, the tables are kept at the end, so they will have
 to be deleted by hand.
 
 =item C<--threads> or C<-T>, C<--no-threads> or C<-N>
 
-Highly EXPERIMENTAL feature.
+EXPERIMENTAL feature.
 
 Try to use threads to perform computations in parallel, with some hocus-pocus
 because perl thread model does not really work well with DBI.
-Default is not to use threads.
+Perl threads are rather heavy and slow, more like communicating processes than
+light weight threads, really.
 
-Beware that using threads has an impact on other features: non temporary
-tables are used, the operations are performed out of a transaction, and
-clearing is done afterwards. Also note that perl threads are rather heavy
-and slow, more like communicating processes than light weight threads, really.
+This does NOT work at all with PostgreSQL.
+
+It works partially with MySQL, at the price of turning off some features: non
+temporary tables are used, the operations are performed out of a transaction,
+and clearing is done afterwards, so the database is left in a mess if there is
+an error somewhere.
+
+Default is not to use threads.
 
 =item C<--stats>
 
@@ -194,7 +207,7 @@ Timeout comparison after C<n> seconds. Default is not to timeout.
 =item C<--transaction>, C<--no-transaction>
 
 Whether to wrap the whole algorithm in a single transaction.
-It may be a little quicker in a transaction, so it is the default.
+It may be a little quicker and safer in a transaction, so it is the default.
 
 =item C<--use-key> or C<-u>
 
@@ -207,7 +220,7 @@ distribution.
 
 Whether to use the information that a column is declared NOT NULL to
 simplify computations by avoiding calls to COALESCE to handle NULL values.
-Default is to use this information.
+Default is to use this information, at the price of querying table metadata.
 
 =item C<--verbose>
 
@@ -233,7 +246,10 @@ with a default. The minimum syntactically correct specification is C</>, but
 that does not necessary mean anything useful.
 See also the EXAMPLES section bellow.
 
-  [driver://][login[:pass]@][host[:port]]/[base/[[schema.]table[?key[:cols]]]]
+  [driver://][login[:pass]@][host][:port]/[base/[[schema.]table[?key[:cols]]]]
+
+Note that some default value used by the DBI drivers may be changed with
+environment variable.
 
 =over 4
 
@@ -261,11 +277,13 @@ See also B<--ask-pass> and B<--env-pass> options.
 
 =item B<host>
 
-Hostname to connect to. Default is localhost.
+Hostname or IP to connect to.
+Default is the empty string, which means connecting to the database on
+localhost with a UNIX socket.
 
 =item B<port>
 
-Tcp-ip port to connect to.
+TCP-IP port to connect to.
 Default is 5432 for PostgreSQL and 3306 for MySQL.
 
 =item B<base>
@@ -344,9 +362,8 @@ It must be deleted from 2 to synchronize it wrt table 1.
 
 =back
 
-In case of key-checksum or data-checksum collision, false positive or
-false negative results may occur. Changing the checksum function would
-help in such cases.
+In case of key-checksum or data-checksum collision, false negative results
+may occur. Changing the checksum function would help in such cases.
 
 =head1 DEPENDENCES
 
@@ -548,8 +565,8 @@ as the reference.
 =head2 ANALYSIS
 
 Let I<n> be the number of rows, I<r> the row size, I<f> the folding factor,
-I<k> the number of differences to be detected, I<c> the checksum size,
-then the costs to identify differences is:
+I<k> the number of differences to be detected, I<c> the checksum size in bits,
+then the costs to identify differences and the error rate is:
 
 =over 2
 
@@ -564,7 +581,7 @@ The volume of the SQL requests is about I<k*log(n)*ceil(log(n)/log(f))>,
 as the list of non matching checksums I<k*log(n)> may be dragged
 on the tree depth.
 
-=item B<number of requests (on each side)>
+=item B<number of requests (on each side, the algorithm is symmetric)>
 
 minimum is I<6+ceil(log(n)/log(f))> for equal tables,
 maximum is I<6+2*ceil(log(n)/log(f))>.
@@ -573,11 +590,26 @@ maximum is I<6+2*ceil(log(n)/log(f))>.
 
 is about I<n*r+n*ln(n)*(f/(f-1))>.
 
+=item B<false negative probability>
+
+I<i.e.> part of the tables are considered equal although they are different.
+With a perfect checksum function, this is the probability of a checksum
+collision at any point where they are computed: about I<n*(f/(f-1))*2**-c>.
+For a million row table with the default algorithm parameter values, this is
+about I<2^20 / 2^64>, that is about 1 chance in 2^44 merge runs.
+
 =back
 
 The lower the folding factor I<f> the better for the network volume,
 but the higher the better for the number of requests and disk I/Os:
 the choice of I<f> is a tradeoff.
+
+The lower the checksum size I<c>, the better for the network volume,
+but the worse for the false negative probability.
+
+If the available bandwidth is reasonable, the comparison is most likely to
+be cpu-bound, and most of the time is spent on computing the initial checksum
+table, and maybe the first summary table.
 
 =head2 IMPLEMENTATION ISSUES
 
@@ -601,6 +633,9 @@ and complexity analysis.
 There is some efforts to build a PostgreSQL/MySQL compatible implementation
 of the algorithm, which added hacks to deal with type conversions and other
 stuff.
+
+This script is reasonably tested, but due to its proof of concept nature
+there is a lot of options the combination of which cannot all be tested.
 
 =head2 REFERENCES
 
@@ -678,11 +713,27 @@ L<http://www.sql-server-tool.com/>
 L<http://www.webyog.com/>
 L<http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>
 
+If the tables to compare are in the same database, a simple SQL
+query can extract the differences. Assuming Tables I<T1> and I<T2>
+with primary key I<id> and non null contents I<data>, then their
+differences is summarized by the following query:
+
+	SELECT COALESCE(T1.id, T2.id) AS id,
+	  CASE WHEN T1.id IS NULL THEN 'DELETE'
+	       WHEN T2.id IS NULL THEN 'INSERT'
+	       ELSE 'UPDATE'
+	  END AS operation
+	FROM T1 FULL JOIN T2 USING (id)
+	WHERE T1.id IS NULL      -- DELETE
+	   OR T2.id IS NULL      -- INSERT
+	   OR T1.data <> T2.data -- UPDATE
+
 =head1 BUGS
 
 All softwares have bugs. This is a software, hence it has bugs.
 
-Reporting bugs is good practice, so tell me if you find one!
+Reporting bugs is good practice, so tell me if you find one.
+If you have a fix, this is even better!
 
 The implementation does not do many sanity checks.
 For instance, it does not check that the declared key is indeed a key.
@@ -705,6 +756,9 @@ then synchronize each tables, then re-enable the checks.
 If the separator character appears within a value, the scripts fails in
 some ugly and unclear way while synchronizing.
 
+There is no neat user interfaces, this is a earthly command line tool.
+This is not a bug, but a feature.
+
 =head1 VERSIONS
 
 See L<http://pgfoundry.org/projects/pg-comparator/> for the latest version.
@@ -714,13 +768,25 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
-Minor documentation improvements and fixes.
+Use asynchronous queries so as to provide some parallelism to the comparison
+without the issues raised by threads. It is enabled by default and can be
+switched off with option "--no-asynchronous".
+Allow empty hostname specification in connection URL to use a UNIX socket.
+Improve the documentation, in particular the analysis section.
+Fix minor typos in the documentation.
+Add and fix various comments in the code.
+The "fast" validation was run successfully.
+
+=item B<version 1.8.2> 2012-08-07 (r1117)
+
 Bug fix in the merge procedure by I<Robert Coup> that could result in
-some strange difference reports in corner cases.
+some strange difference reports in corner cases, when there were collisions
+on the "idc" in the initial checksum table.
 Fix broken synchronization with '|' separator, raised by I<Aldemir Akpinar>.
 Warn about possible issues with large objects. Add --long-read-len option as
 a possible way to circumvent such issues. Try to detect these issues.
 Add a counter for metadata queries.
+Minor documentation improvements and fixes.
 
 =item B<version 1.8.1> 2012-03-24 (r1109)
 
@@ -855,12 +921,13 @@ saying so (see my webpage for current address).
 
 =cut
 
-use strict; # I don't like perl;-)
+use strict; # I don't like perl
+use warnings; # I dont trust perl
 use Getopt::Long qw(:config no_ignore_case);
 use DBI;
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1117 $';
+my $revision = '$Revision: 1148 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -868,16 +935,18 @@ $revision =~ tr/0-9//cd;
 # various option defaults
 my ($verb, $debug, $temp, $ask_pass, $env_pass) = (0, 0, 1, 0, undef);
 my ($factor, $max_ratio, $max_report, $max_levels) =  (7, 0.1, undef, 0);
-my ($report, $threads, $cleanup, $skip, $clear) = (1, 0, 0, 0, 0);
+my ($report, $threads, $async, $cleanup, $skip, $clear) = (1, 0, 1, 0, 0, 0);
 my ($usekey, $usenull, $synchronize, $do_it, $do_trans) = (0, 1, 0, 0, 1);
 my $prefix = 'cmp';
 my ($maskleft) = 1;
 my ($stats, $name, $key_size, $col_size) = (undef, 'none', 0, 0);
 my ($where, $expect);
 my ($longreadlen); # max size of blobs...
+my %attrs = ( 'pgsql' => {}, 'mysql' => {}); # async attributes for prepare/do
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
+# the textual representation cannot be trusted to avoid the separator
 my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'xor', '|');
 
 
@@ -894,6 +963,7 @@ sub usage($$$)
 }
 
 # show message depending on verbosity
+# globals: $verb (verbosity level)
 # verb(2, "something...")
 sub verb($$)
 {
@@ -905,9 +975,8 @@ sub verb($$)
 
 my ($dbh1, $dbh2);
 
-# parse a connection string... or many options instead?
-# could we directly ask for the DBI connection string?
-# ($db,$u,$w,$h,$p,$b,$t,$k,$c) = parse_conn("connection-string")
+# parse a connection url
+# ($db,$u,$w,$h,$p,$b,$t,$k,$c) = parse_conn("connection-url")
 # globals: $verb
 # pgsql://calvin:secret@host:5432/base/schema.table?key:col,list
 sub parse_conn($)
@@ -935,7 +1004,7 @@ sub parse_conn($)
   {
     # parse authority if non empty. ??? url-translation?
     die "invalid authority string '$auth'\n"
-      unless $auth =~ /^((\w+)(:([^.]*))?\@)?([^\@:\/]+)(:(\d+))?$/;
+      unless $auth =~ /^((\w+)(:([^.]*))?\@)?([^\@:\/]*)(:(\d+))?$/;
 
     $user=$2 if defined $1;
     $pass=$4 if defined $3;
@@ -984,8 +1053,6 @@ sub parse_conn($)
       $keys = [@k] if $k;
       $cols = [@c] if $c;
     }
-
-    verb 3, "base=$base tabl=$tabl keys=@$keys cols=@$cols" if $debug;
   }
 
   # return result as a list
@@ -1004,6 +1071,33 @@ sub driver($)
   die "unexpected db ($db)";
 }
 
+# store: dbh -> current asynchronous query
+# really needed for mysql
+my %async_in_flight = ();
+
+# wait for the end of an asynchronous query
+sub async_wait($$)
+{
+  my ($dbh, $db) = @_;
+  die "must be in async mode!" unless $async;
+  # postgresql is simple
+  $dbh->pg_result() if $db eq 'pgsql';
+  # but not so mysql
+  # work around the fails if there is no current async query
+  if ($db eq 'mysql' and defined $async_in_flight{$dbh})
+  {
+    verb 5, "waiting for \"$async_in_flight{$dbh}\"";
+    eval {
+      # hmmm... "Gathering async_query_in_flight results for the wrong handle"
+      $dbh->mysql_async_result();
+    };
+    if ($@ and $debug) {
+      warn "$@";
+    }
+  }
+  $async_in_flight{$dbh} = undef;
+}
+
 # serialize database connection for handling through threads
 # no-op if not threaded.
 sub dbh_serialize($$)
@@ -1011,6 +1105,9 @@ sub dbh_serialize($$)
   my ($dbh, $db) = @_;
   if ($threads) {
     verb 5, "serializing db=$db";
+    # wait for asynchronous query completion, if any
+    async_wait($dbh, $db) if $async;
+    # then serialize
     $_[0] = $dbh->take_imp_data
 	or die $dbh->errstr;
   }
@@ -1047,7 +1144,13 @@ sub conn($$$$$$)
 {
   my ($db,$b,$h,$p,$u,$w) = @_;
   my $s = source_template($db);
-  $s =~ s/\%b/$b/g;  $s =~ s/\%h/$h/g;  $s =~ s/\%p/$p/g;  $s =~ s/\%u/$u/g;
+  $s =~ s/\%b/$b/g; # database
+  $s =~ s/\%h/$h/g; # host
+  if ($h eq '') { # cleanup if unused...
+    $s =~ s/host=;//;
+  }
+  $s =~ s/\%p/$p/g; # port
+  $s =~ s/\%u/$u/g; # user
   verb 3, "connecting to s=$s u=$u";
   my $dbh = DBI->connect($s, $u, $w,
 		{ RaiseError => 1, PrintError => 0, AutoCommit => 1 })
@@ -1065,7 +1168,7 @@ sub build_conn($$$$$$)
   my ($db, $b, $h, $p, $u, $w) = @_;
   verb 2, "connecting...";
   my $dbh = conn($db, $b, $h, $p, $u, $w);
-  # max length of blobs to fetch
+  # max length of blobs to fetch, may be ignored by driver...
   $dbh->{LongReadLen} = $longreadlen if defined $longreadlen;
   $dbh->{LongTruncOk} = 0;
   # back to serialized form for threads
@@ -1083,24 +1186,28 @@ my $query_meta = 0; # special queries to metadata
 
 # sql_do($dbh, $query)
 # execute an SQL query on a database
+# actually used only for CREATE TABLE & some DROP TABLE
 # side effects: keep a count of queries and communications
-sub sql_do($$)
+sub sql_do($$$)
 {
-  my ($dbh, $query) = @_;
+  my ($dbh, $db, $query) = @_;
   $query_nb++;
   $query_sz += length($query);
   verb 3, "$query_nb\t$query";
-  return $dbh->do($query);
+  # for mysql, if there is a query under way?
+  # not needed for postgresql which will wait automatically
+  async_wait($dbh, $db) if $async and $db eq 'mysql';
+  $async_in_flight{$dbh} = "$query";
+  return $dbh->do($query, $attrs{$db});
 }
 
 # execute a parametric statement with col & key values
 sub sth_param_exec($$$$@)
 {
   my ($doit, $what, $sth, $keys, @cols) = @_;
-  my $verbose = $verb>2;
   my $index = 1;
-  print STDERR "### $what(@cols,[$sep/$keys])\n" if $verbose;
-  # ??? $sth->execute(@cols, split(/$sep/, $keys));
+  verb 3, "$what(@cols,[$sep/$keys])";
+  # ??? $sth->execute(@cols, split(/[$sep]/, $keys));
   for my $val (@cols, split(/[$sep]/, $keys)) {
     $sth->bind_param($index++, $val) if $doit;
   }
@@ -1196,38 +1303,44 @@ sub get_table_pkey($$$$)
 }
 
 # tell whether a column is declared NOT NULL
-my %not_nul_col = ();
+my %not_null_col = ();
 
 sub col_is_not_null($$$)
 {
   my ($dbh, $dhpbt, $col) = @_;
   my ($db, $base, $table) = (split /:/, $dhpbt)[0,3,4];
-  # memoize
+  # use memoized information
   return $main::not_null_col{"$dhpbt/$col"}
     if exists $main::not_null_col{"$dhpbt/$col"};
-  # else get information
+  # else try to get it
   $query_meta++;
+  # ??? for some obscure reason, this fails is postgresql under -T
   my $sth =
-      $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
+  $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
+  die "column_info not implemented by driver" unless defined $sth;
   my $h = $sth->fetchrow_hashref();
-  my $res = $$h{NULLABLE}==0;
+  die "column information not returned" unless defined $h;
+  my $res = (defined ${$h}{NULLABLE} and ${$h}{NULLABLE}==0);
   $sth->finish();
   $main::not_null_col{"$dhpbt/$col"} = $res;
+  verb 4, "not null info: $db $base $table $col: $res";
   return $res;
 }
 
-# $number_of_rows = count($dbh,$table)
-sub count($$)
+# $number_of_rows = count($dbh,$db,$table)
+sub count($$$)
 {
-  my ($dbh, $table) = @_;
+  my ($dbh, $db, $table) = @_;
   my $q = "SELECT COUNT(*) FROM $table";
   $query_nb++;
   $query_sz += length($q);
+  async_wait($dbh, $db) if $async;
+  verb 3, "$query_nb\t$q";
   return $dbh->selectrow_array($q);
 }
 
 # return the average whole row size considered by the comparison
-# beware, this query is not counted
+# this query is not counted, it is just for statistics
 sub col_size($$$$)
 {
   my ($dbh, $db, $table, $cols) = @_;
@@ -1249,6 +1362,7 @@ sub col_size($$$$)
     die "unexpected db ($db)";
   }
   verb 4, "col_size query: $q";
+  async_wait($dbh, $db) if $async;
   return $dbh->selectrow_array($q);
 }
 
@@ -1406,12 +1520,12 @@ sub compute_checksum($$$$$$$$)
   my ($dbh, $db, $table, $skeys, $keys, $cols, $name, $skip) = @_;
   dbh_materialize($dbh, $db);
   verb 2, "building checksum table ${name}0";
-  sql_do($dbh, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
+  sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
   # ??? CREATE + INSERT SELECT to get row count?
   # would also allow to choose better types (int2/int4/int8...)?
   # ??? What about using quoted strings or using an array for values?
   # what would be the impact on the cksum? on pg/my compatibility?
-  sql_do($dbh,
+  sql_do($dbh, $db,
 	 "CREATE ${temp}TABLE ${name}0 AS " .
 	 "SELECT " .
 	 # ??? hmmm... should rather use quote_nullable()? then how to unquote?
@@ -1425,7 +1539,7 @@ sub compute_checksum($$$$$$$$)
 	 ($where? "WHERE $where": ''));
   # count should be available somewhere,
   # but alas does not seem to be returned by do("CREATE TABLE ... AS ... ")
-  my $count = $skip? 0: count($dbh, "${name}0");
+  my $count = $skip? 0: count($dbh, $db, "${name}0");
   dbh_serialize($dbh, $db);
   return $count;
 }
@@ -1439,6 +1553,22 @@ sub aggregate($$)
   return $agg;
 }
 
+# compute a summary for a given level
+# assumes that dbh is materialized...
+sub compute_summary($$$$@)
+{
+  my ($dbh, $db, $name, $level, @masks) = @_;
+  verb 2, "building summary table ${name}$level ($masks[$level])";
+  sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}${level}") if $cleanup;
+  sql_do($dbh, $db,
+	 "CREATE ${temp}TABLE ${name}${level} AS " .
+	 # the "& mask" is really a modulo operation
+	 "SELECT idc & $masks[$level] AS idc, " .
+	 aggregate($db, $agg) . "(cks) AS cks " .
+	 "FROM ${name}" . ($level-1) . " " .
+	 "GROUP BY idc & $masks[$level]");
+}
+
 # compute_summaries($dbh, $name, @masks)
 # globals: $verb $temp $agg $cleanup
 sub compute_summaries($$$@)
@@ -1447,15 +1577,7 @@ sub compute_summaries($$$@)
   dbh_materialize($dbh, $db);
   # compute cascade of summary tapbles
   for my $level (1 .. @masks-1) {
-    verb 2, "building summary table ${name}$level ($masks[$level])";
-    sql_do($dbh, "DROP TABLE IF EXISTS ${name}${level}") if $cleanup;
-    sql_do($dbh,
-	   "CREATE ${temp}TABLE ${name}${level} AS " .
-	   # the "& mask" is really a modulo operation
-	   "SELECT idc & $masks[$level] AS idc, " .
-	   aggregate($db, $agg) . "(cks) AS cks " .
-	   "FROM ${name}" . ($level-1) . " " .
-	   "GROUP BY idc & $masks[$level]");
+    compute_summary($dbh, $db, $name, $level, @masks);
   }
   dbh_serialize($dbh, $db);
 }
@@ -1473,7 +1595,9 @@ sub selidc($$$$$@)
   # the "& mask" is really a modulo operation
   $query .= "WHERE idc & $mask IN (" . join(',', @idc) . ') ' if @idc;
   $query .= 'ORDER BY idc' . (($get_id and not $usekey)? ', id': '');
-  my $sth = $dbh->prepare($query);
+  # keep trac of running query
+  $async_in_flight{$dbh} = "$query" if $async;
+  my $sth = $dbh->prepare($query, $attrs{$db});
   $query_nb++;
   $query_sz += length($query);
   verb 3, "$query_nb\t$query";
@@ -1524,13 +1648,14 @@ sub table_cleanup($$$$)
   verb 5, "cleaning $db/$name";
   dbh_materialize($dbh, $db);
   for my $i (0 .. $levels) {
-    sql_do($dbh, "DROP TABLE ${name}$i");
+    sql_do($dbh, $db, "DROP TABLE ${name}$i");
   }
   dbh_serialize($dbh, $db);
 }
 
 ############################################################### MERGE ALGORITHM
 
+# this is the core of the comparison algorithm
 # compute differences by climbing up the tree, output result on the fly.
 # differences($dbh1, $dbh2, $db1, $db2, $name1, $name2, @masks)
 # globals: $max_report $verb $report
@@ -1563,6 +1688,13 @@ sub differences($$$$$$@)
     # select statement handlers
     my $s1 = selidc($dbh1, $db1, ${name1}.$level, $mask, !$level, @idc);
     my $s2 = selidc($dbh2, $db2, ${name2}.$level, $mask, !$level, @idc);
+
+    # wait for results...
+    if ($async) {
+      async_wait($dbh1, $db1);
+      async_wait($dbh2, $db2);
+    }
+
     # content of one row from the above select result
     my (@r1, @r2);
 
@@ -1574,14 +1706,19 @@ sub differences($$$$$$@)
 	unless @r1 or not $s1->{Active};
       @r2 = $s2->fetchrow_array(), @r2 && ($level? $query_fr++: $query_fr0++)
 	unless @r2 or not $s2->{Active};
+      # nothing left on both side, merge is completed
       last unless @r1 or @r2;
-      # else both lists are defined, some merging to do
-      if (@r1 && @r2 && $r1[0]==$r2[0] && ($level || $r1[2] eq $r2[2]))
+      # else at least one of the list contains something
+      if (# both lists contain something
+	  @r1 && @r2 &&
+	  # their id checksums are equal
+	  $r1[0]==$r2[0] &&
+	  # for level 0, the keys are also equal
+	  ($level || $r1[2] eq $r2[2]))
       {
-	# matching idc (and "id" if at level 0)
 	if ($r1[1] ne $r2[1]) { # but non matching checksums
 	  if ($level) {
-	    push @next_idc, $r1[0]; # to be investigated...
+	    push @next_idc, $r1[0]; # to be investigated at next level...
 	  } else {
 	    # the level-0 table keeps the actual key
 	    $count ++;
@@ -1589,18 +1726,22 @@ sub differences($$$$$$@)
 	    print "UPDATE $r1[2]\n" if $report; # final result
 	  }
 	}
+	# else the tuple checksums match, nothing to do!
 	# both tuples are consummed
 	@r1 = @r2 = ();
       }
       # if they do not match, one is missing or less than the other
-      elsif ((!@r2) || (@r1 &&
-	      ($r1[0]<$r2[0] ||
-	       # special case for level 0 on idc collision
+      elsif (# right side is empty, only something on the left side
+	     (!@r2) ||
+	     # or the left side id checksum is less than right side
+	     (@r1 && ($r1[0]<$r2[0] ||
+	       # or special case for level 0 on idc collision
 	       (!$level && $r1[0]==$r2[0] && $r1[2] lt $r2[2]))))
       {
 	# more idc (/id) in table 1
 	if ($level) {
-	  push @mask_insert, "$r1[0]/$masks[$#masks]"; # later
+	  # a whole chunck is empty on the right side, managed later
+	  push @mask_insert, "$r1[0]/$masks[$#masks]";
 	} else {
 	  $count ++;
 	  push @insert, $r1[2];
@@ -1610,14 +1751,17 @@ sub differences($$$$$$@)
 	@r1 = ();
       }
       # this could be a else
-      elsif ((!@r1) || (@r2 &&
-	      ($r1[0]>$r2[0] ||
+      elsif (# left side is empty, only something in the right side
+	     (!@r1) ||
+	     # or the right side id checksum is less than left side
+	     (@r2 && ($r1[0]>$r2[0] ||
 	       # special case for level 0 on idc collision
 	       (!$level && $r1[0]==$r2[0] && $r1[2] gt $r2[2]))))
       {
 	# more idc in table 2
 	if ($level) {
-	  push @mask_delete, "$r2[0]/$masks[$#masks]"; # later
+	  # a whole chunck is empty on the left side, managed later
+	  push @mask_delete, "$r2[0]/$masks[$#masks]";
 	} else {
 	  $count ++;
 	  push @delete, $r2[2];
@@ -1630,9 +1774,10 @@ sub differences($$$$$$@)
 	die "this state should never happen";
       }
     }
-
+    # close queries
     $s1->finish();
     $s2->finish();
+    # make ready for next round
     $level--; # next table! 0 is the initial checksum table
     $mask = pop @masks; # next mask
     @idc = @next_idc; # idcs to be investigated on next round
@@ -1694,6 +1839,8 @@ GetOptions(
   "expect|e=i" => \$expect,
   "report|r!" => \$report,
   # parallelism
+  "asynchronous|A!" => \$async,
+  "na|nA|X" => sub { $async = 0; },
   "threads|T!" => \$threads,
   "nt|nT|N" => sub { $threads = 0; },
   # stats
@@ -1715,12 +1862,13 @@ die "invalid value for stats option, expecting 'txt' or 'csv', got '$stats'"
 # fix default options when using threads...
 if ($threads and not $debug)
 {
-  warn "WARNING some options fixed for threads...";
+  my $changed = 0;
   # it seems that statements are closed when playing with threads
   # so that commits & temporary removal are done automatically...
-  $temp = 0;
-  $do_trans = 0;
-  $clear = 1;
+  $temp = 0, $changed++ unless $temp==0;
+  $do_trans = 0, $changed++ unless $do_trans==0;
+  $clear = 1, $changed++ unless $clear==1;
+  warn "WARNING $changed options fixed for threads..." if $changed;
 }
 
 # fix --temp or --no-temp option
@@ -1761,6 +1909,22 @@ $p2 = 3306 if not defined $p2 and $db2 eq 'mysql';
 $b2 = $b1 unless defined $b2;
 $t2 = $t1 unless defined $t2;
 
+# set needed attributes for asynchronous queries
+if ($async)
+{
+  if ($db1 eq 'pgsql' or $db2 eq 'pgsql')
+  {
+    use DBD::Pg qw(:async);
+    $attrs{pgsql} = { pg_async => PG_ASYNC + PG_OLDQUERY_WAIT };
+  }
+  if ($db1 eq 'mysql' or $db2 eq 'mysql')
+  {
+    # alas, mysql lacks the nice lazyness of PG_OLDQUERY_WAIT,
+    # so I have to always try to wait before a prepare/do
+    $attrs{mysql} = { async => 1 };
+  }
+}
+
 die "null should be 'text' or 'hash', got $null"
     unless $null =~ /^(text|hash)$/i;
 
@@ -1798,13 +1962,11 @@ if ($ask_pass and not defined $w2)
   $w2 = Term::ReadPassword::read_password('connection 2 password> ');
 }
 
-# some more sanity checks
-
-die "sorry, 'xor' aggregate does not work for mixed comparison"
-    if not $debug and $db1 ne $db2 and $agg eq 'xor';
-
-die "sorry, threading does not work with PostgreSQL driver"
+# some sanity checks, that are skipped under debugging so as to test
+die "sorry, threading does not seem to work with PostgreSQL driver"
     if not $debug and $threads and ($db1 eq 'pgsql' or $db2 eq 'pgsql');
+
+# ??? what about other checks?
 
 ########################################################### THREADED OPERATIONS
 
@@ -1878,8 +2040,13 @@ my $fmt2 = null_template($db2, $null, $checksum, $checksize);
 my $dhpbt1 = "$db1:$h1:$p1:$b1:$t1";
 my $dhpbt2 = "$db2:$h2:$p2:$b2:$t2";
 
+# needed by subs_null
+dbh_materialize($dbh1, $db1);
+dbh_materialize($dbh2, $db2);
+
 if ($usenull)
 {
+  # hmmm... I should ckeck that it is coherent
   $pk1 = subs_null($fmt1, $dbh1, $dhpbt1, $k1);
   $pk2 = subs_null($fmt2, $dbh2, $dhpbt2, $k2);
   $pc1 = subs_null($fmt1, $dbh1, $dhpbt1, $c1);
@@ -1895,6 +2062,9 @@ else
 
 my $tk1 = subs_null(null_template($db1, 'text', 0, 0), $dbh1, $dhpbt1, $k1);
 my $tk2 = subs_null(null_template($db2, 'text', 0, 0), $dbh2, $dhpbt2, $k2);
+
+dbh_serialize($dbh1, $db1);
+dbh_serialize($dbh2, $db2);
 
 verb 1, "checksumming...";
 my ($count1, $count2);
@@ -1927,13 +2097,17 @@ else
 verb 1, "computing size and masks after folding factor...";
 $count1 = $count2 = $skip if $skip;
 
-my $size = $count1>$count2? $count1: $count2; # MAX
+my $size = $count1>$count2? $count1: $count2; # MAX size of both tables
 
 # stop at this number of differences
 $max_report = $max_ratio * $size unless defined $max_report;
 
-# ??? |count2-count1|>max_diff => abort ?
+# can we already stop now?
+my $min_diff = abs($count2-$count1);
+die "too many differences, at least $min_diff > $max_report"
+  if defined $max_report and $min_diff>$max_report;
 
+# compute initial "full" masks which must be larger than size
 my ($mask, $nbits, @masks) = (0, 0);
 while ($mask < $size) {
   $mask = 1+($mask<<1);
@@ -1950,8 +2124,8 @@ while ($mask) {
   push @masks, $mask;
 }
 my $levels = @masks;
-splice @masks, $max_levels if $max_levels; # cut-off
-verb 3, "masks=@masks";
+splice @masks, $max_levels if $max_levels; # cut-off option
+verb 3, "masks=(@masks)";
 
 $tcks = [gettimeofday] if $stats;
 
@@ -1969,8 +2143,18 @@ if ($threads)
 }
 else
 {
-  compute_summaries($dbh1, $db1, $name1, @masks);
-  compute_summaries($dbh2, $db2, $name2, @masks);
+  #compute_summaries($dbh1, $db1, $name1, @masks);
+  #compute_summaries($dbh2, $db2, $name2, @masks);
+  # hmmm... possibly try to parallelize with asynchronous queries...
+  # no threads here, no need to materialize and serialize handlers
+  for my $level (1 .. @masks-1) {
+    compute_summary($dbh1, $db1, $name1, $level, @masks);
+    compute_summary($dbh2, $db2, $name2, $level, @masks);
+  }
+  if ($async) {
+    async_wait($dbh1, $db1);
+    async_wait($dbh2, $db2);
+  }
 }
 
 $tsum = [gettimeofday] if $stats;
@@ -1994,7 +2178,7 @@ if ((defined @$bins and @$bins) or (defined $bdel and @$bdel))
   # this cost two full table-0 scans, one on each side...
   if ($threads)
   {
-    # hmmm... useless thread if list is empty
+    # hmmm... thread is useless if list is empty
     $thr1 = threads->new(\&get_bulk_keys,
 			 $dbh1, $db1, "${name1}0", 'INSERT', @$bins)
       or die "cannot create thread 1-3";
@@ -2049,7 +2233,7 @@ if ($synchronize and
   my $where_k2 = (join '=? AND ', @$k2) . '=?';
   my $set_c2 = (join '=?, ', @$c2) . '=?';
 
-  # deletions
+  # delete rows
   if (@$del or @$delb)
   {
     my $del_sql = "DELETE FROM $t2 WHERE " .
@@ -2073,7 +2257,7 @@ if ($synchronize and
 	  if @$ins or @$insb or @$upt;
   }
 
-  # insert value
+  # insert rows
   if (@$ins or @$insb)
   {
     my $ins_sql = "INSERT INTO $t2(" .
@@ -2100,7 +2284,7 @@ if ($synchronize and
     #  $ins_sth
   }
 
-  # update
+  # update rows
   if (@$upt)
   {
     die "there must be some columns to update" unless $c1;
@@ -2132,9 +2316,10 @@ if ($synchronize and
       "\n",
       "*** WARNING ***\n",
       "\n",
-      "the synchro was not performed...\n",
-      "set option --do-it if you really want to.\n",
-      "BEWARE that you may lose your data!\n",
+      "The synchronization was not performed, sorry...\n",
+      "Also set non documented option --do-it if you really want to it.\n",
+      "BEWARE that you may lose your data and your friends!\n",
+      "Back-up before running a synchronization!\n",
       "\n"
       unless $do_it;
 }
@@ -2208,7 +2393,10 @@ sub delay($$)
 
 if (defined $stats)
 {
+  # ??? some these statistics are not trustworthy when running with threads
+
   my $options =
+      ($async << 7) |
       ($usenull << 6) |
       ($maskleft << 5) |
       (($temp?1:0) << 4) |
@@ -2283,7 +2471,7 @@ if (defined $stats)
   }
 }
 
-# check count...
-# this check may fail if there is a hash collision.
+# check count for the validation
+# this check may fail if there is a hash collision?
 die "unexpected number of differences (got $count, expecting $expect)"
   if defined $expect and $expect != $count;

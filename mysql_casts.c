@@ -1,4 +1,4 @@
-/* $Id: mysql_casts.c 779 2010-07-13 13:56:04Z fabien $ */
+/* $Id: mysql_casts.c 1127 2012-08-08 07:49:29Z fabien $ */
 
 // minimal headers
 #include <stdint.h>
@@ -16,7 +16,7 @@ longlong biginttoint2(UDF_INIT *, UDF_ARGS *, char *, char *);
 longlong biginttoint8(
   UDF_INIT *initid __attribute__((unused)),
   UDF_ARGS *args,
-  char *is_null __attribute__((unused)),
+  char *is_null,
   char *error __attribute__((unused)))
 {
   // if in doubt, return NULL
@@ -38,7 +38,7 @@ my_bool biginttoint8_init(
 longlong biginttoint4(
   UDF_INIT *initid __attribute__((unused)),
   UDF_ARGS *args,
-  char *is_null __attribute__((unused)),
+  char *is_null,
   char *error __attribute__((unused)))
 {
   // if in doubt, return NULL
@@ -61,7 +61,7 @@ my_bool biginttoint4_init(
 longlong biginttoint2(
   UDF_INIT *initid __attribute__((unused)),
   UDF_ARGS *args,
-  char *is_null __attribute__((unused)),
+  char *is_null,
   char *error __attribute__((unused)))
 {
   // if in doubt, return NULL

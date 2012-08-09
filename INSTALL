@@ -1,21 +1,33 @@
-Postgresql 8.0 or better, simply use the pgxs GNU makefile provided:
+* PostgreSQL
+
+With version 8.0 or better, simply use the pgxs GNU makefile provided:
 
 	sh> make install
+
 
 You must only insure that the "pg_config" found in your path is the one
 of the target postgresql server, and that development packages are installed.
 
-If you are fed up, you can remove all installed files with:
+Then load the needed extensions (casts, checksum functions, xor aggregate):
+
+	sh> cat pgc_*.sql xor_aggregate.sql | psql ...
+
+To uninstall, do:
 
 	sh> make uninstall
 
-For MySQL, you need "mysql_config" and the development packages.
+
+* MySQL
+
+You need "mysql_config" and the development packages.
 
 	sh> make mysql_install
-	sh> cat mysql_*.sql | mysql <your-database>
-        # this requires appending "/usr/lib/mysql/plugin/* rm," 
-        # to "/etc/apparmor.d/usr.sbin.mysqld" and
-        # restarting apparmor under ubuntu.
+
+Then load the needed extensions (casts, checksum functions):
+
+	sh> cat mysql_*.sql | mysql ...
+        # under Ubuntu this requires appending "/usr/lib/mysql/plugin/* rm,"
+        # to "/etc/apparmor.d/usr.sbin.mysqld" and restarting apparmor.
 
 To uninstall, do:
 

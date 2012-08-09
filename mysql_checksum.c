@@ -1,4 +1,4 @@
-/* $Id: mysql_checksum.c 687 2010-04-03 12:07:15Z fabien $
+/* $Id: mysql_checksum.c 1126 2012-08-08 07:47:13Z fabien $
  *
  * This function computes a simple and fast checksum of a binary
  * It is unclear to me what happends on different encodings.
@@ -22,7 +22,7 @@ longlong cksum2(UDF_INIT *, UDF_ARGS *, char *, char *);
 longlong cksum2(
   UDF_INIT *initid __attribute__((unused)),
   UDF_ARGS *args,
-  char *is_null __attribute__((unused)),
+  char *is_null,
   char *error __attribute__((unused)))
 {
   // if in doubt, return NULL

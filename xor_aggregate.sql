@@ -1,4 +1,7 @@
--- $Id: xor_aggregate.sql 571 2010-03-25 10:18:47Z fabien $
+-- $Id: xor_aggregate.sql 1141 2012-08-09 12:22:18Z fabien $
+--
+-- add XOR aggregate to PostgreSQL
+--
 
 -- default behavior for strict functions used: NULLs are ignored...
 
