@@ -1,3 +1,8 @@
-* use EXTENSION
-* integrate to pgxn?
+* distribution
+- use EXTENSION framework?
+- integrate to pgxn?
+
 * allow to use trigger maintenained checksums?
+
+* BUGS
+- source[12]: will not work with -T if the driver is not standard, see driver()

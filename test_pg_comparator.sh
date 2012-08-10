@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 1142 2012-08-09 12:23:32Z fabien $
+# $Id: test_pg_comparator.sh 1158 2012-08-10 08:31:38Z fabien $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost -- \
@@ -9,7 +9,8 @@
 PATH=$PATH:.
 
 # default values
-rows=1000 name=foo seed=1 width=5 nkey=0 ncol=2 base=$USER
+rows=1000 name=foo width=5 nkey=0 ncol=2 base=$USER
+seed=$(date +%s)
 
 # operations to perform
 create= modify= cmp=
@@ -58,7 +59,7 @@ do
 	" -a auth: authority string for connection\n" \
 	" -b base: database name\n" \
 	" -n name: table prefix\n" \
-	" -s seed: random generator seed\n" \
+	" -s seed: random generator seed, default is seconds since 1970\n" \
 	" -r rows: vertical size\n" \
 	" -k keys: number of additionnal key columns\n" \
 	" -c cols: number of data columns\n" \

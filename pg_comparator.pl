@@ -1,11 +1,14 @@
 #! /usr/bin/perl
 #
-# $Id: pg_comparator.pl 1148 2012-08-09 12:49:41Z fabien $
+# $Id: pg_comparator.pl 1159 2012-08-10 08:31:50Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
 # HELP 3: read pod stuff bellow with your favorite text viewer
 #
+
+use strict;   # I don't like perl
+use warnings; # I dont trust perl
 
 =head1 NAME
 
@@ -42,49 +45,68 @@ of the option name.
 
 =over 4
 
-=item C<--aggregate=agg> or C<-a agg>
+=item C<--aggregate=(sum|xor)> or C<-a (sum|xor)>
 
-Aggregation function to be used for summaries, 'xor' or 'sum'.
-Must operate on the result of the checksum function.
-Default is 'xor'.
+Aggregation function to be used for summaries, either B<xor> or B<sum>.
+It must operate on the result of the checksum function.
+For PostgreSQL, the B<xor> aggregate needs to be loaded.
+There is a signed/unsigned issue on the key hash when using xor for comparing
+tables on MySQL vs PostgreSQL.
+
+Default is B<sum> because it is available by default and works in mixed mode.
 
 =item C<--ask-pass>
 
 Ask for passwords interactively. See also C<--env-pass> option below.
+
+Default is not to ask for passwords.
 
 =item C<--assume-size=n>
 
 Assume this value as the table size. It is sufficient for the algorithm to
 perform well that this size is in the order of magnitude of the actual table
 size.
+
 Default is to query the table sizes, which is skipped if this option is set.
 
 =item C<--asynchronous> or C<-A>, C<--no-asynchronous> or C<-X>
 
-Whether to run asynchronous queries.
-This provides some parallelism, however the two connections are more or less
-synchronized per query.
-Default is to use asynchronous queries.
+Whether to run asynchronous queries. This provides some parallelism, however
+the two connections are more or less synchronized per query.
+
+Default is to use asynchronous queries to enable some parallelism.
 
 =item C<--checksum-function=fun> or C<--cf=fun> or C<-c fun>
 
-Checksum function to use. Must be B<ck> or B<md5>. Default is B<ck>, which
-is faster, especially if the operation is cpu-bound and the bandwidth is high.
+Checksum function to use, either B<ck> or B<md5>.
+For both PostgreSQL and MySQL the provided B<ck> checksum functions must be
+loaded into the target databases.
+Choosing B<md5> does not come free either, the provided cast functions
+must be loaded into the target databases.
+
+Default is B<ck>, which is faster, especially if the operation is cpu-bound
+and the bandwidth is high.
 
 =item C<--checksum-size=n> or C<--check-size=n> or C<--cs=n> or C<-z n>
 
-Checksum size, 2 4 or 8 bytes. Default is 8.
+Checksum size, must be B<2>, B<4> or B<8> bytes.
+
+Default is B<8>. There should be no reason to change that.
 
 =item C<--cleanup>
 
 Drop checksum and summary tables beforehand.
 Useful after a run with C<--no-temp> and C<--no-clear>.
 
+Default is not to drop because it is not needed.
+
 =item C<--clear>
 
 Drop checksum and summary tables explicitly after the computation.
 Note that they are dropped implicitly by default when the connection
 is closed as they are temporary.
+
+Default is B<not> to clear explicitely the checksum and summary tables.
 
 =item C<--env-pass=var>
 
@@ -101,10 +123,11 @@ This option is used by non regression tests.
 
 Folding factor: log2 of the number of rows grouped together at each stage,
 starting from the leaves so that the first round always groups as many records
-as possible.
-The power of two allows to use masked computations.
+as possible. The power of two allows to use masked computations.
 The minimum value of 1 builds a binary tree.
-The default value 7 was chosen after some basic tests on medium-size cases
+
+Default folding factor log2 is B<7>, i.e. size 128 folds.
+This default value was chosen after some basic tests on medium-size cases
 with medium or low bandwidth. Values from 4 to 8 should be a reasonable
 choice for most settings.
 
@@ -115,18 +138,21 @@ Show short help.
 =item C<--long-read-len=0> or C<-L 0>
 
 Set max size for fetched binary large objects.
-Default is to keep the default value set by the driver.
 Well, it seems to be ignored at least by the PostgreSQL driver.
+
+Default is to keep the default value set by the driver.
 
 =item C<--man> or C<-m>
 
-Show manual page.
+Show manual page interactively in the terminal.
 
 =item C<--max-ratio=0.1>
 
 Maximum relative search effort. The search is stopped if the number of results
 is above this threshold expressed relatively to the table size.
 Use 2.0 for no limit (all tuples were deleted and new one are inserted).
+
+Default is B<0.1>, i.e. a 10% difference is allowed before giving up.
 
 =item C<--max-report=n>
 
@@ -135,41 +161,83 @@ differences goes beyond this threshold. If set, the previous C<--max-ratio>
 option is ignored, otherwise the effort is computed with the ratio once
 the table size is known.
 
+Default is to compute the maximum number of reported differences based on
+the C<--max-ratio> option.
+
 =item C<--max-levels=0>
 
-Maximum number of levels used. Allows to cut-off folding.
-Default is 0, meaning no cut-off. Setting a value of 1
-only uses the checksum table, without summaries.
+Maximum number of levels used. Allows to cut-off folding. 0 means no cut-off.
+Setting a value of 1 would only use the checksum table, without summaries.
+A value of 3 or 4 would be raisonable, as the last levels of the tree are
+nice for the theoretical complexity formula, but do not bring any performance
+in practice.
 
-=item C<--null=text>
+Default is B<0>.
+
+=item C<--null='text'>
 
 How to handle NULL values. Either B<hash> to hash all values, where NULL
 has one special hash value, or B<text> where NULL values are substituted
-by the C<NULL> string. Default is B<text> because it is faster.
+by the C<NULL> string.
+
+Default is B<text> because it is faster.
 
 =item C<--option> or C<-o>
 
 Show option summary.
 
-=item C<--prefix=cmp>
+=item C<--prefix='cmp'>
 
-Name prefix for comparison tables. May be schema-qualified.
+Name prefix, possibly schema qualified, used for generated comparison tables.
+
+Default is C<cmp>.
 
 =item C<--report>, C<--no-report>
 
-Report keys as they are found. Default is to report.
+Report differing keys to stdout as they are found.
+
+Default is to report.
 
 =item C<--separator='|'> or C<-s '|'>
 
 Separator string or character when concatenating key columns.
 This character should not appear in any values.
+
 Defaults to the pipe '|' character.
+
+=item C<--source-1='DBI:...'>, C<--source-2='...'> or C<-1 '...'>, C<-2 '...'>
+
+Take full control of DBI data source specification and mostly ignore
+the comparison authentication part of the source or target URLs.
+One can connect with "DBI:Pg:service=backup", use an alternate driver,
+set any option allowed by the driver...
+However, the database server specified in the URL must be consistent with
+this source specification so that the queries' syntax is the right one.
+
+Default is to rely on the two URL arguments.
+
+=item C<--stats=(txt|csv)>
+
+Show various statistics about the comparison performed in this format.
+Also, option C<--stats-name> gives the test a name, usefull to generate csv
+files that will be processed automatically.
+
+Default is B<not> to show statistics.
+
+=item C<--synchronize> or C<-S>
+
+Actually perform operations to synchronize the second table wrt the first.
+Well, not really. It is only done if you add C<--do-it> or C<-D>.
+Save your data before attempting anything like that!
+Default is not to synchronize.
 
 =item C<--temporary>, C<--no-temporary>
 
-Whether to use temporary tables. Default is to use them.
-If you don't, the tables are kept at the end, so they will have
-to be deleted by hand.
+Whether to use temporary tables. If you don't, the tables are kept at the end,
+so they will have to be deleted by hand.
+
+Default is to use temporary tables that are automatically wiped out when the
+connection is closed.
 
 =item C<--threads> or C<-T>, C<--no-threads> or C<-N>
 
@@ -187,32 +255,29 @@ temporary tables are used, the operations are performed out of a transaction,
 and clearing is done afterwards, so the database is left in a mess if there is
 an error somewhere.
 
-Default is not to use threads.
-
-=item C<--stats>
-
-Show various statistics.
-Option C<--stats-name> gives the test a name.
-
-=item C<--synchronize> or C<-S>
-
-Actually perform operations to synchronize the second table wrt the first.
-Well, not really. It is only done if you add C<--do-it> or C<-D>.
-Save your data before attempting anything like that!
+Default is B<not> to use threads, as it does not work for all databases and
+has significant drawbacks.
 
 =item C<--timeout n>
 
-Timeout comparison after C<n> seconds. Default is not to timeout.
+Timeout comparison after C<n> seconds.
+
+Default is not to timeout. Be patient.
 
 =item C<--transaction>, C<--no-transaction>
 
 Whether to wrap the whole algorithm in a single transaction.
-It may be a little quicker and safer in a transaction, so it is the default.
+
+Default is to use a wrapping transaction, as it seems to be both faster and
+safer to do so.
 
 =item C<--use-key> or C<-u>
 
-Whether to use the key of the tables to distribute tuples among branches.
-The key must be simple, integer, not NULL, and evenly distributed.
+Whether to directly use the value of the key to distribute tuples among
+branches. The key must be simple, integer, not NULL, and evenly distributed.
+If you have a reasonably spread integer key, consider using this option to
+avoid half of the checksum table hash computations.
+
 Default is to hash the key, so as to handle any type, composition and
 distribution.
 
@@ -220,11 +285,14 @@ distribution.
 
 Whether to use the information that a column is declared NOT NULL to
 simplify computations by avoiding calls to COALESCE to handle NULL values.
+
 Default is to use this information, at the price of querying table metadata.
 
 =item C<--verbose>
 
 Be verbose about what is happening. The more you ask, the more verbose.
+
+Default is to be quiet, so that possible warnings or errors stand out.
 
 =item C<--version>
 
@@ -236,6 +304,8 @@ SQL boolean condition on table tuples for partial comparison.
 Useful to reduce the load if you know that expected differences are in
 some parts of your data, say those time-stamped today...
 
+Default is to compare whole tables.
+
 =back
 
 =head1 ARGUMENTS
@@ -244,12 +314,14 @@ The two arguments describe database connections with the following URL-like
 syntax, where square brackets denote optional parts. Many parts are optional
 with a default. The minimum syntactically correct specification is C</>, but
 that does not necessary mean anything useful.
-See also the EXAMPLES section bellow.
 
   [driver://][login[:pass]@][host][:port]/[base/[[schema.]table[?key[:cols]]]]
 
-Note that some default value used by the DBI drivers may be changed with
-environment variable.
+See the EXAMPLES section bellow, and also the C<--source-*> options above.
+
+Note that some default value used by DBI drivers may be changed with
+driver-specific environment variables, and that DBI also provides its own
+defaults and overrides, so what actually happens may not always be clear.
 
 =over 4
 
@@ -607,9 +679,8 @@ the choice of I<f> is a tradeoff.
 The lower the checksum size I<c>, the better for the network volume,
 but the worse for the false negative probability.
 
-If the available bandwidth is reasonable, the comparison is most likely to
-be cpu-bound, and most of the time is spent on computing the initial checksum
-table, and maybe the first summary table.
+If the available bandwidth is reasonable, the comparison will most likely
+be cpu-bound: the time is spent mainly on computing the initial checksum table.
 
 =head2 IMPLEMENTATION ISSUES
 
@@ -619,7 +690,7 @@ and easy to manipulate afterwards.
 The B<xor> aggregate is a good choice because there is no overflow issue with
 it, it takes into account all bits of the input, and it can easily be defined
 on any binary data. The B<sum> aggregate is also okay, but it requires some
-kind of integer type.
+kind of underlying integer type.
 
 NULL values must be taken care appropriately.
 
@@ -641,7 +712,7 @@ there is a lot of options the combination of which cannot all be tested.
 
 A paper was presented at a conference about this tool and its algorithm.
 
-I<Remote Comparison of Database Tables> by Fabien Coelho,
+B<Remote Comparison of Database Tables> by I<Fabien Coelho>,
 In Third International Conference on
 Advances in Databases, Knowledge, and Data Applications (DBKDA),
 pp 23-28, St Marteen, The Netherlands Antilles, January 2011.
@@ -659,7 +730,7 @@ See L<http://www.perlmonks.org/index.pl?node_id=381053> for details.
 
 =back
 
-In the above paper, three algorithms are presented.
+In the Sys Admin paper, three algorithms are presented.
 The first one compares two tables with a checksum technique.
 The second one finds UPDATE or INSERT differences based on a 2-level
 (checksum and summary) table hierarchy. The algorithm is asymmetrical,
@@ -759,6 +830,8 @@ some ugly and unclear way while synchronizing.
 There is no neat user interfaces, this is a earthly command line tool.
 This is not a bug, but a feature.
 
+There are too many options.
+
 =head1 VERSIONS
 
 See L<http://pgfoundry.org/projects/pg-comparator/> for the latest version.
@@ -768,30 +841,45 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
+Add C<--source-*> options to allow taking over DBI data source specification.
+Change default aggregate to C<sum> so that it works as expected by default
+when mixing PostgreSQL and MySQL databases. The results are okay with C<xor>,
+but more paths than necessary were investigated, which can unduly trigger
+the max report limit.
+Improved documentation. In particular default option settings are provided
+systematically.
+The I<fast> validation was run successfully on PostgreSQL 9.1.4 and
+MySQL 5.5.24.
+
+=item B<version 2.0.0> 2012-08-09 (r1148)
+
 Use asynchronous queries so as to provide some parallelism to the comparison
 without the issues raised by threads. It is enabled by default and can be
-switched off with option "--no-asynchronous".
+switched off with option C<--no-asynchronous>.
 Allow empty hostname specification in connection URL to use a UNIX socket.
 Improve the documentation, in particular the analysis section.
 Fix minor typos in the documentation.
 Add and fix various comments in the code.
-The "fast" validation was run successfully.
+The I<fast> validation was run successfully on PostgreSQL 9.1.4 and
+MySQL 5.5.24.
 
 =item B<version 1.8.2> 2012-08-07 (r1117)
 
 Bug fix in the merge procedure by I<Robert Coup> that could result in
 some strange difference reports in corner cases, when there were collisions
-on the "idc" in the initial checksum table.
+on the I<idc> in the initial checksum table.
 Fix broken synchronization with '|' separator, raised by I<Aldemir Akpinar>.
-Warn about possible issues with large objects. Add --long-read-len option as
-a possible way to circumvent such issues. Try to detect these issues.
+Warn about possible issues with large objects.
+Add C<--long-read-len> option as a possible way to circumvent such issues.
+Try to detect these issues.
 Add a counter for metadata queries.
 Minor documentation improvements and fixes.
 
 =item B<version 1.8.1> 2012-03-24 (r1109)
 
 Change default separator again, to '|'.
-Fix "where" option mishandling when counting, pointed out by I<Enrique Corona>.
+Fix C<--where> option mishandling when counting, pointed out by
+I<Enrique Corona>.
 
 =item B<version 1.8.0> 2012-01-08 (r1102)
 
@@ -907,8 +995,8 @@ Initial revision.
 
 =head1 COPYRIGHT
 
-Copyright (c) 2004-@YEAR@, Fabien Coelho <pg dot comparator at coelho dot net>
-L<http://www.coelho.net/>
+Copyright (c) 2004-@YEAR@, I<Fabien Coelho>
+<pg dot comparator at coelho dot net> L<http://www.coelho.net/>
 
 This software is distributed under the terms of the BSD Licence.
 Basically, you can do whatever you want, but you have to keep
@@ -921,13 +1009,8 @@ saying so (see my webpage for current address).
 
 =cut
 
-use strict; # I don't like perl
-use warnings; # I dont trust perl
-use Getopt::Long qw(:config no_ignore_case);
-use DBI;
-
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1148 $';
+my $revision = '$Revision: 1159 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -937,18 +1020,15 @@ my ($verb, $debug, $temp, $ask_pass, $env_pass) = (0, 0, 1, 0, undef);
 my ($factor, $max_ratio, $max_report, $max_levels) =  (7, 0.1, undef, 0);
 my ($report, $threads, $async, $cleanup, $skip, $clear) = (1, 0, 1, 0, 0, 0);
 my ($usekey, $usenull, $synchronize, $do_it, $do_trans) = (0, 1, 0, 0, 1);
-my $prefix = 'cmp';
-my ($maskleft) = 1;
+my ($prefix, $maskleft) = ('cmp', 1);
 my ($stats, $name, $key_size, $col_size) = (undef, 'none', 0, 0);
-my ($where, $expect);
-my ($longreadlen); # max size of blobs...
-my %attrs = ( 'pgsql' => {}, 'mysql' => {}); # async attributes for prepare/do
+# condition, tests, max size of blobs, data sources...
+my ($where, $expect, $longreadlen, $source1, $source2);
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
 # the textual representation cannot be trusted to avoid the separator
-my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'xor', '|');
-
+my ($null, $checksum, $checksize, $agg, $sep) = ('text', 'ck', 8, 'sum', '|');
 
 ######################################################################### UTILS
 
@@ -973,6 +1053,8 @@ sub verb($$)
 
 #################################################################### CONNECTION
 
+use DBI;
+
 my ($dbh1, $dbh2);
 
 # parse a connection url
@@ -994,7 +1076,7 @@ sub parse_conn($)
     $db = 'pgsql';
   }
 
-  # split authority and path
+  # split authority and path on first '/'
   die "invalid connection string '$c', must contain '\/'\n"
     unless $c =~ /^([^\/]*)\/(.*)/;
 
@@ -1004,11 +1086,16 @@ sub parse_conn($)
   {
     # parse authority if non empty. ??? url-translation?
     die "invalid authority string '$auth'\n"
-      unless $auth =~ /^((\w+)(:([^.]*))?\@)?([^\@:\/]*)(:(\d+))?$/;
+      unless $auth =~ /^((\w+)         # login
+			 (:([^.]*)     # :password
+			 )?\@)?        # @
+		       ([^\@:\/]*)     # host
+		       (:(\d+))?$      # :port
+		      /x;
 
     $user=$2 if defined $1;
     $pass=$4 if defined $3;
-    $host=$5;
+    $host=$5; # may be empty, but must be defined!
     $port=$7 if defined $6;
     verb 3, "user=$user pass=$pass host=$host port=$port" if $debug;
   }
@@ -1072,7 +1159,7 @@ sub driver($)
 }
 
 # store: dbh -> current asynchronous query
-# really needed for mysql
+# really needed only for mysql
 my %async_in_flight = ();
 
 # wait for the end of an asynchronous query
@@ -1088,7 +1175,8 @@ sub async_wait($$)
   {
     verb 5, "waiting for \"$async_in_flight{$dbh}\"";
     eval {
-      # hmmm... "Gathering async_query_in_flight results for the wrong handle"
+      # hmmm... under -T -A we can have some
+      # "Gathering async_query_in_flight results for the wrong handle"
       $dbh->mysql_async_result();
     };
     if ($@ and $debug) {
@@ -1114,6 +1202,7 @@ sub dbh_serialize($$)
 }
 
 # materialize database connection handled through threads
+# no-op if not threaded.
 sub dbh_materialize($$)
 {
   my ($dbh, $db) = @_;
@@ -1138,19 +1227,25 @@ sub source_template($)
   die "unexpected db ($db)";
 }
 
-# $dbh = conn($db,$base,$host,$port,$user,$pass)
+# $dbh = conn($db,$base,$host,$port,$user,$pass,$source)
 # globals: $verb
-sub conn($$$$$$)
+sub conn($$$$$$$)
 {
-  my ($db,$b,$h,$p,$u,$w) = @_;
-  my $s = source_template($db);
-  $s =~ s/\%b/$b/g; # database
-  $s =~ s/\%h/$h/g; # host
-  if ($h eq '') { # cleanup if unused...
-    $s =~ s/host=;//;
+  my ($db, $b, $h, $p, $u, $w, $src) = @_;
+  my $s;
+  if (not defined $src) {
+    # derive data source specification from URL
+    $s = source_template($db);
+    $s =~ s/\%b/$b/g; # database
+    $s =~ s/\%h/$h/g; # host
+    $s =~ s/host=;// if $h eq ''; # cleanup if host is unused...
+    $s =~ s/\%p/$p/g; # port
+    $s =~ s/\%u/$u/g; # user (not used)
   }
-  $s =~ s/\%p/$p/g; # port
-  $s =~ s/\%u/$u/g; # user
+  else {
+    verb 2, "overriding DBI data source specification with: $src";
+    $s = $src;
+  }
   verb 3, "connecting to s=$s u=$u";
   my $dbh = DBI->connect($s, $u, $w,
 		{ RaiseError => 1, PrintError => 0, AutoCommit => 1 })
@@ -1163,11 +1258,11 @@ sub conn($$$$$$)
 }
 
 # connect as a function for threading
-sub build_conn($$$$$$)
+sub build_conn($$$$$$$)
 {
-  my ($db, $b, $h, $p, $u, $w) = @_;
+  my ($db, $b, $h, $p, $u, $w, $s) = @_;
   verb 2, "connecting...";
-  my $dbh = conn($db, $b, $h, $p, $u, $w);
+  my $dbh = conn($db, $b, $h, $p, $u, $w, $s);
   # max length of blobs to fetch, may be ignored by driver...
   $dbh->{LongReadLen} = $longreadlen if defined $longreadlen;
   $dbh->{LongTruncOk} = 0;
@@ -1183,6 +1278,9 @@ my $query_fr = 0;   # fetched summary rows
 my $query_fr0 = 0;  # fetched checksum rows
 my $query_data = 0; # fetched data rows for synchronizing
 my $query_meta = 0; # special queries to metadata
+
+# async attributes for prepare/do
+my %attrs = ( 'pgsql' => {}, 'mysql' => {});
 
 # sql_do($dbh, $query)
 # execute an SQL query on a database
@@ -1708,6 +1806,7 @@ sub differences($$$$$$@)
 	unless @r2 or not $s2->{Active};
       # nothing left on both side, merge is completed
       last unless @r1 or @r2;
+      #debug: verb 6, "merging: @r1 / @r2" if $verb>=6;
       # else at least one of the list contains something
       if (# both lists contain something
 	  @r1 && @r2 &&
@@ -1792,6 +1891,8 @@ sub differences($$$$$$@)
 
 ####################################################################### OPTIONS
 
+use Getopt::Long qw(:config no_ignore_case);
+
 # option management
 GetOptions(
   # help
@@ -1830,6 +1931,8 @@ GetOptions(
   "clear!" => \$clear,
   "prefix|p=s" => \$prefix,
   # connection
+  "source-1|source1|1=s" => \$source1,
+  "source-2|source2|2=s" => \$source2,
   "ask-password|ask-passwd|ask-pass|ap!" => \$ask_pass,
   "environment-password|env-password|env-passwd|env-pass|ep=s" => \$env_pass,
   "transaction|trans|tr!" => \$do_trans,
@@ -1858,6 +1961,13 @@ $stats = 'txt' if defined $stats and $stats eq '';
 
 die "invalid value for stats option, expecting 'txt' or 'csv', got '$stats'"
     unless not defined $stats or $stats =~ /^(csv|txt)$/;
+
+# minimal check for provided data sources
+die "data source 1 must be a DBI connection string: $source1"
+  if defined $source1 and $source1 !~ /^dbi:/i;
+
+die "data source 2 must be a DBI connection string: $source2"
+  if defined $source2 and $source2 !~ /^dbi:/i;
 
 # fix default options when using threads...
 if ($threads and not $debug)
@@ -1895,8 +2005,8 @@ $p1 = 5432 if not defined $p1 and $db1 eq 'pgsql';
 $p1 = 3306 if not defined $p1 and $db1 eq 'mysql';
 
 # these are necessary
-die "no base on first connection" unless defined $b1;
-die "no table on first connection" unless defined $t1;
+die "no base on first connection" unless defined $b1 or defined $source1;
+die "no table on first connection" unless defined $t1 or defined $source1;
 
 # second connection
 my ($db2, $u2, $w2, $h2, $p2, $b2, $t2, $k2, $c2) = parse_conn(shift);
@@ -1966,6 +2076,12 @@ if ($ask_pass and not defined $w2)
 die "sorry, threading does not seem to work with PostgreSQL driver"
     if not $debug and $threads and ($db1 eq 'pgsql' or $db2 eq 'pgsql');
 
+# there is signed (pg)/unsigned (my) issue with key xor4 in mixed mode
+# at least with md5. note that the answer seems okay in the end, but more
+# path than necessary are investigated.
+die "sorry, xor aggregate does not work well in mixed mode"
+    if not $debug and $agg eq 'xor' and $db1 ne $db2;
+
 # ??? what about other checks?
 
 ########################################################### THREADED OPERATIONS
@@ -1993,10 +2109,10 @@ my ($thr1, $thr2);
 if ($threads)
 {
   require threads;
-  ($thr1) = threads->new(\&build_conn, $db1, $b1, $h1, $p1, $u1, $w1)
+  ($thr1) = threads->new(\&build_conn, $db1, $b1, $h1, $p1, $u1, $w1, $source1)
     or die "cannot create thread 1-1";
 
-  ($thr2) = threads->new(\&build_conn, $db2, $b2, $h2, $p2, $u2, $w2)
+  ($thr2) = threads->new(\&build_conn, $db2, $b2, $h2, $p2, $u2, $w2, $source2)
     or die "cannot create thread 2-1";
 
   verb 1, "waiting for connexions and counts...";
@@ -2005,8 +2121,8 @@ if ($threads)
 }
 else
 {
-  ($dbh1) = build_conn($db1, $b1, $h1, $p1, $u1, $w1);
-  ($dbh2) = build_conn($db2, $b2, $h2, $p2, $u2, $w2);
+  ($dbh1) = build_conn($db1, $b1, $h1, $p1, $u1, $w1, $source1);
+  ($dbh2) = build_conn($db2, $b2, $h2, $p2, $u2, $w2, $source2);
 }
 
 # set defaults...

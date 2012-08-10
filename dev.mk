@@ -1,4 +1,4 @@
-# $Id: dev.mk 1119 2012-08-07 21:21:46Z fabien $
+# $Id: dev.mk 1149 2012-08-09 12:55:55Z fabien $
 
 # script distribution
 dir	= $(name)
@@ -28,7 +28,7 @@ $(name): $(name).pl
 tgz: $(name)-$(VERSION).tgz
 
 # for a new version, run in the .. directory: make version=1.8.2 publish
-# then edit pg_comparator.pl file to fix the version as well.
+# then edit pg_comparator.pl and ../local.mk to fix the version as well.
 # keep a copy of the targz in ~/SAVE/SOFTS/
 # distribute on pgfoundry.
 $(name)-$(VERSION).tgz: $(F.dist)
