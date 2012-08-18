@@ -2,7 +2,16 @@
 - use EXTENSION framework?
 - integrate to pgxn?
 
-* allow to use trigger maintenained checksums?
+* asynchronous queries
+- could push statements from lists..
 
 * BUGS
-- source[12]: will not work with -T if the driver is not standard, see driver()
+- source[12]: will not work with -T if driver is not standard, see driver()
+- DBD::mysql::db mysql_async_result failed:
+  Gathering async_query_in_flight results for the wrong handle
+  at ./pg_comparator line 1264.
+- under -T may not really stop on errors?
+- under -T, should I lock shared variables before updating them?
+
+* validation
+- check with NULL in keys. id=? with NULL is not a good idea...

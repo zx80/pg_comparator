@@ -1,4 +1,4 @@
-# $Id: dev.mk 1149 2012-08-09 12:55:55Z fabien $
+# $Id: dev.mk 1292 2012-08-16 20:54:07Z fabien $
 
 # script distribution
 dir	= $(name)
@@ -14,13 +14,18 @@ F.in	= $(wildcard *.in)
 F.dist 	= $(F.c) $(F.sql) $(F.in) $(DOCS) $(DATA) $(name) \
 		INSTALL LICENSE Makefile
 
-# derived documentations
+# default target
+default: $(name)
+
+# derived script
 $(name): $(name).pl
 	sed -e 's/@VERSION@/$(VERSION)/g;' \
 	    -e 's/@REVISION@/$(REVISION)/g;' \
 	    -e 's/@YEAR@/$(YEAR)/g;' \
 	    -e 's/@DATE@/$(DATE)/g' $< > $@
-	chmod +x $@
+	chmod a+rx $@
+	perl -c $@
+	touch -r $< $@
 
 %: %.src
 	sed -e's/@VERSION@/$(VERSION)/g;s/@YEAR@/$(YEAR)/g' $< > $@

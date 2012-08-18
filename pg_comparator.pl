@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 #
-# $Id: pg_comparator.pl 1159 2012-08-10 08:31:50Z fabien $
+# $Id: pg_comparator.pl 1332 2012-08-18 16:36:40Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -61,20 +61,24 @@ Ask for passwords interactively. See also C<--env-pass> option below.
 
 Default is not to ask for passwords.
 
-=item C<--assume-size=n>
-
-Assume this value as the table size. It is sufficient for the algorithm to
-perform well that this size is in the order of magnitude of the actual table
-size.
-
-Default is to query the table sizes, which is skipped if this option is set.
-
 =item C<--asynchronous> or C<-A>, C<--no-asynchronous> or C<-X>
 
 Whether to run asynchronous queries. This provides some parallelism, however
 the two connections are more or less synchronized per query.
 
 Default is to use asynchronous queries to enable some parallelism.
+
+=item C<--checksum-computation=(create|insert)> or C<--cc=...>
+
+How to create the checksum table.
+Use B<create> to use a C<CREATE ... AS SELECT ...> query,
+or B<insert> to use a C<CREATE ...; INSERT ... SELECT ...> query.
+The former will require an additional counting to get the table size,
+so in the end there are two queries anyway.
+There is a type size issue with the B<insert> strategy on mysql, the
+cumulated key string length must be under 64 bytes.
+
+Default is B<create> because it always works for both databases.
 
 =item C<--checksum-function=fun> or C<--cf=fun> or C<-c fun>
 
@@ -104,9 +108,17 @@ Default is not to drop because it is not needed.
 
 Drop checksum and summary tables explicitly after the computation.
 Note that they are dropped implicitly by default when the connection
-is closed as they are temporary.
+is closed as they are temporary, see C<-(-no)-temporary> option.
 
-Default is B<not> to clear explicitely the checksum and summary tables.
+Default is B<not> to clear explicitely the checksum and summary tables,
+as it is not needed. Clear is turned on with C<--threads>, if not set one
+way or the other.
+
+=item C<--debug> or C<-d>
+
+Set debug mode. Repeat for higher debug levels. See also C<--verbose>.
+
+Default is not to run in debug mode.
 
 =item C<--env-pass=var>
 
@@ -135,6 +147,24 @@ choice for most settings.
 
 Show short help.
 
+=item C<--key-checksum='kcs'> or C<--kcs=...>
+
+Use key checksum attribute of this name, which must be already available in
+the tables to compare. This option also requires option C<--tuple-checksum>.
+See also the EXAMPLES section below for how to set a checksum trigger.
+Consider C<--use-key> instead if you already have a reasonably distributed
+integer primary key.
+
+=item C<--lock>, C<--no-lock>
+
+Whether to lock tables.
+Setting the option explicitely overrides the default one way or another.
+For PostgreSQL, this option requires C<--transaction>, which is enabled by
+default.
+
+Default depends on the current operation: the table is I<not locked> for a
+comparison, but it is I<locked> for a synchronization.
+
 =item C<--long-read-len=0> or C<-L 0>
 
 Set max size for fetched binary large objects.
@@ -152,7 +182,7 @@ Maximum relative search effort. The search is stopped if the number of results
 is above this threshold expressed relatively to the table size.
 Use 2.0 for no limit (all tuples were deleted and new one are inserted).
 
-Default is B<0.1>, i.e. a 10% difference is allowed before giving up.
+Default is B<0.1>, i.e. an overall 10% difference is allowed before giving up.
 
 =item C<--max-report=n>
 
@@ -169,7 +199,7 @@ the C<--max-ratio> option.
 Maximum number of levels used. Allows to cut-off folding. 0 means no cut-off.
 Setting a value of 1 would only use the checksum table, without summaries.
 A value of 3 or 4 would be raisonable, as the last levels of the tree are
-nice for the theoretical complexity formula, but do not bring any performance
+nice for the theoretical complexity formula, but do not improve performance
 in practice.
 
 Default is B<0>.
@@ -186,11 +216,14 @@ Default is B<text> because it is faster.
 
 Show option summary.
 
-=item C<--prefix='cmp'>
+=item C<--prefix='pgc_cmp'>
 
-Name prefix, possibly schema qualified, used for generated comparison tables.
+Name prefix, possibly schema qualified, used for generated comparison tables
+by appending numbers to it. Consider changing the prefix if you expect several
+comparisons to run concurrently agains the same database.
 
-Default is C<cmp>.
+Default is C<pgc_cmp>. Cheksum tables is named C<pgc_cmp_1_0> and
+C<pgc_cmp_2_0>, and summary tables are named by increasing the last number.
 
 =item C<--report>, C<--no-report>
 
@@ -200,10 +233,18 @@ Default is to report.
 
 =item C<--separator='|'> or C<-s '|'>
 
-Separator string or character when concatenating key columns.
-This character should not appear in any values.
+Separator string or character used when concatenating key columns for
+computing checksums.
 
 Defaults to the pipe '|' character.
+
+=item C<--size=n>
+
+Assume this value as the table size. It is sufficient for the algorithm to
+perform well that this size is in the order of magnitude of the actual table
+size.
+
+Default is to query the table sizes, which is skipped if this option is set.
 
 =item C<--source-1='DBI:...'>, C<--source-2='...'> or C<-1 '...'>, C<-2 '...'>
 
@@ -211,6 +252,8 @@ Take full control of DBI data source specification and mostly ignore
 the comparison authentication part of the source or target URLs.
 One can connect with "DBI:Pg:service=backup", use an alternate driver,
 set any option allowed by the driver...
+See C<man DBD::Pg> and C<man DBD:mysql> for the various options that can
+be set through the DBI data source specification.
 However, the database server specified in the URL must be consistent with
 this source specification so that the queries' syntax is the right one.
 
@@ -222,26 +265,29 @@ Show various statistics about the comparison performed in this format.
 Also, option C<--stats-name> gives the test a name, usefull to generate csv
 files that will be processed automatically.
 
-Default is B<not> to show statistics.
+Default is B<not> to show statistics, because it requires additional
+synchronizations and is not necessarily interesting to the user.
 
 =item C<--synchronize> or C<-S>
 
 Actually perform operations to synchronize the second table wrt the first.
 Well, not really. It is only done if you add C<--do-it> or C<-D>.
 Save your data before attempting anything like that!
+
 Default is not to synchronize.
 
 =item C<--temporary>, C<--no-temporary>
 
-Whether to use temporary tables. If you don't, the tables are kept at the end,
-so they will have to be deleted by hand.
+Whether to use temporary tables. If you don't, the tables are kept by default
+at the end, so they will have to be deleted by hand. See C<--clear> option
+to request a cleanup.
 
 Default is to use temporary tables that are automatically wiped out when the
 connection is closed.
 
 =item C<--threads> or C<-T>, C<--no-threads> or C<-N>
 
-EXPERIMENTAL feature.
+Highly EXPERIMENTAL feature.
 
 Try to use threads to perform computations in parallel, with some hocus-pocus
 because perl thread model does not really work well with DBI.
@@ -250,13 +296,9 @@ light weight threads, really.
 
 This does NOT work at all with PostgreSQL.
 
-It works partially with MySQL, at the price of turning off some features: non
-temporary tables are used, the operations are performed out of a transaction,
-and clearing is done afterwards, so the database is left in a mess if there is
-an error somewhere.
+It works partially with MySQL, at the price of turning off C<--transaction>.
 
-Default is B<not> to use threads, as it does not work for all databases and
-has significant drawbacks.
+Default is B<not> to use threads, as it does not work for all databases.
 
 =item C<--timeout n>
 
@@ -271,12 +313,22 @@ Whether to wrap the whole algorithm in a single transaction.
 Default is to use a wrapping transaction, as it seems to be both faster and
 safer to do so.
 
+=item C<--tuple-checksum='tcs'> or C<--tcs=...>
+
+Use tuple checksum attribute of this name, which must be already available
+in the tables to compare. This option requires to set also either C<--use-key>
+or C<--key-checksum=...> above. The provided checksum attributes must
+not appear in the lists of key and other columns.
+See also the EXAMPLES section below for how to set a checksum trigger.
+
+Default is to build both checksums on the fly.
+
 =item C<--use-key> or C<-u>
 
 Whether to directly use the value of the key to distribute tuples among
 branches. The key must be simple, integer, not NULL, and evenly distributed.
-If you have a reasonably spread integer key, consider using this option to
-avoid half of the checksum table hash computations.
+If you have a reasonably spread integer primary key, consider using this option
+to avoid half of the checksum table hash computations.
 
 Default is to hash the key, so as to handle any type, composition and
 distribution.
@@ -288,13 +340,13 @@ simplify computations by avoiding calls to COALESCE to handle NULL values.
 
 Default is to use this information, at the price of querying table metadata.
 
-=item C<--verbose>
+=item C<--verbose> or C<-v>
 
 Be verbose about what is happening. The more you ask, the more verbose.
 
 Default is to be quiet, so that possible warnings or errors stand out.
 
-=item C<--version>
+=item C<--version> or C<-V>
 
 Show version information and exit.
 
@@ -303,6 +355,8 @@ Show version information and exit.
 SQL boolean condition on table tuples for partial comparison.
 Useful to reduce the load if you know that expected differences are in
 some parts of your data, say those time-stamped today...
+The same condition is passed on both sides, so both tables must be pretty
+similar so that it works. This is usually the case.
 
 Default is to compare whole tables.
 
@@ -331,7 +385,7 @@ Database driver to use. Use B<pgsql> for PostgreSQL, and B<mysql> for MySQL.
 Heterogeneous databases may be compared and synchronized, however beware that
 subtle typing, encoding and casting issues may prevent heterogeneous
 comparisons or synchronizations to succeed.
-Default is B<pgsql>.
+Default is B<pgsql> for the first connection, and same as first for second.
 
 =item B<login>
 
@@ -345,7 +399,7 @@ Note that it is a bad idea to put a password as a command argument.
 Default is none for the first connection, and the same password
 as the first connection for the second I<if> the connection targets
 the same host, port and uses the same login.
-See also B<--ask-pass> and B<--env-pass> options.
+See also C<--ask-pass> and C<--env-pass> options.
 
 =item B<host>
 
@@ -409,6 +463,45 @@ C<server1> to PostgreSQL on C<server2>.
   ./pg_comparator -S -D --ask-pass \
       mysql://calvin@server1/wikipedia/user pgsql://hobbes@server2/
 
+For PostgreSQL, you may add trigger-maintained key and tuple checksums as:
+
+  -- TABLE Foo(id SERIAL PRIMARY KEY, data ... NOT NULL);
+  -- add a key and tuple checksum attributes
+  -- the key checksum can be skipped if you use --use-key,
+  -- for which the key must be a simple NOT NULL integer.
+  ALTER TABLE Foo
+    ADD COLUMN key_cs INT4 NOT NULL DEFAULT 0,
+    ADD COLUMN tup_cs INT8 NOT NULL DEFAULT 0;
+  -- function to update the tuple checksum
+  -- if some attributes may be NULL, they must be coalesced
+  CREATE FUNCTION foo_cs() RETURNS TRIGGER AS $$
+    BEGIN
+      -- compute key checksum
+      NEW.key_cs = cksum4(NEW.id);
+      -- compute tuple checksum
+      NEW.tup_cs = cksum8(NEW.id || '|' || NEW.data);
+      RETURN NEW;
+    END; $$ LANGUAGE plpgsql;
+  -- set trigger to call the checksum update function
+  CREATE TRIGGER foo_cs_trigger
+    BEFORE UPDATE OR INSERT ON Foo
+    FOR EACH ROW EXECUTE PROCEDURE foo_cs();
+  -- if table Foo is not initially empty,
+  -- update its contents to trigger checksum computations
+  UPDATE Foo SET id=id;
+
+Then a fast comparison, which does not need to compute the initial checksum
+table, can be requested with:
+
+  ./pg_comparator --tcs=tup_cs --kcs=key_cs \
+      admin@server1/app/Foo?id:data hobbes@server2/
+
+As the primary key is a simple integer, the I<key_cs> could be left out
+and the comparison could be launched with:
+
+  ./pg_comparator --tcs=tup_cs --use-key \
+      admin@server1/app/Foo?id:data hobbes@server2/
+
 =head1 OUTPUT
 
 The output of the command consists of lines describing the differences
@@ -450,8 +543,8 @@ The C<COALESCE> function takes care of NULL values in columns.
 =item 2
 
 A checksum function must be used to reduce and distribute key
-and columns values. It may be changed with the B<--checksum> option.
-Its size can be selected with the B<--checksize> option (currently 2, 4 or 8
+and columns values. It may be changed with the C<--checksum> option.
+Its size can be selected with the C<--checksize> option (currently 2, 4 or 8
 bytes).
 
 Suitable implementations are available for PostgreSQL and can be loaded into
@@ -462,7 +555,7 @@ casts are also available for MySQL, see C<mysql_*.sql>.
 
 An aggregate function is used to summarize checksums for a range of rows.
 It must operate on the result of the checksum function.
-It may be changed with the B<--aggregate> option.
+It may be changed with the C<--aggregate> option.
 
 Suitable implementations of a exclusive-or C<xor> aggregate are available
 for PostgreSQL and can be loaded into the server by processing
@@ -529,11 +622,13 @@ table data columns that are to be checked for differences, then
 it is performed by querying target table I<T> as follow:
 
   CREATE TABLE T(0) AS
-  SELECT key AS id, checksum(key) AS idc, checksum(key || cols) AS cks
-  FROM t;
+    SELECT key AS pk,                   -- primary key
+           checksum(key) AS kcs,        -- key checksum
+           checksum(key || cols) AS tcs -- tuple checksum
+    FROM t;
 
 The initial key is kept, as it will be used to show differing keys
-at the end. The rational for the I<idc> column is to randomize the
+at the end. The rational for the I<kcs> column is to randomize the
 key-values distribution so as to balance aggregates in the next phase.
 The key must appear in the checksum also, otherwise content exchanged
 between two keys would not be detected in some cases.
@@ -542,13 +637,14 @@ between two keys would not be detected in some cases.
 
 Now we compute a set of cascading summary tables by grouping I<f>
 (folding factor) checksums together at each stage. The grouping is
-based on a mask on the I<idc> column to take advantage of the
+based on a mask on the I<kcs> column to take advantage of the
 checksum randomization. Starting from I<p=0> we build:
 
   CREATE TABLE T(p+1) AS
-  SELECT idc & mask(p+1) AS idc, XOR(cks)
-  FROM T(p)
-  GROUP BY idc & mask(p+1);
+    SELECT kcs & mask(p+1) AS kcs, -- key checksum subset
+           XOR(tcs) AS tcs         -- tuple checksum summary
+    FROM T(p)
+    GROUP BY kcs & mask(p+1);
 
 The mask(p) is defined so that it groups together on average I<f>
 checksums together: mask(0) = ceil2(size); mask(p) = mask(p-1)/f;
@@ -592,14 +688,14 @@ and we are done. Otherwise, if these checksums differ, some investigation
 is needed to detect offending keys.
 
 The investigation is performed by going down the table hierarchy and
-looking for all I<idc> for which there was a difference in the checksum
+looking for all I<kcs> for which there was a difference in the checksum
 on the previous level. The same query is performed on both side
 at each stage:
 
-  SELECT idc, cks
+  SELECT kcs, tcs
   FROM T(p)
-  WHERE idc & mask(p+1) IN (idc-with-diff-checksums-from-level-p+1)
-  ORDER BY idc [and on level 0: , id];
+  WHERE kcs & mask(p+1) IN (kcs-with-diff-checksums-from-level-p+1)
+  ORDER BY kcs [and on level 0: , id];
 
 And the results from both sides are merged together.
 When doing the merge procedure, four cases can arise:
@@ -608,24 +704,24 @@ When doing the merge procedure, four cases can arise:
 
 =item 1
 
-Both I<idc> and I<cks> match. Then there is no difference.
+Both I<kcs> and I<tcs> match. Then there is no difference.
 
 =item 2
 
-Although I<idc> does match, I<cks> does not. Then this I<idc> is
+Although I<kcs> does match, I<tcs> does not. Then this I<kcs> is
 to be investigated at the next level, as the checksum summary differs.
 If we are already at the last level, then the offending key can be shown.
 
 =item 3
 
-No I<idc> match, one supplemental I<idc> in the first side.
-Then this I<idc> correspond to key(s) that must be inserted
+No I<kcs> match, one supplemental I<kcs> in the first side.
+Then this I<kcs> correspond to key(s) that must be inserted
 for syncing the second table wrt the first.
 
 =item 4
 
-No I<idc> match, one supplemental I<idc> in the second side.
-Then this I<idc> correspond to key(s) that must be deleted
+No I<kcs> match, one supplemental I<kcs> in the second side.
+Then this I<kcs> correspond to key(s) that must be deleted
 for syncing the second table wrt the first.
 
 =back
@@ -668,7 +764,7 @@ I<i.e.> part of the tables are considered equal although they are different.
 With a perfect checksum function, this is the probability of a checksum
 collision at any point where they are computed: about I<n*(f/(f-1))*2**-c>.
 For a million row table with the default algorithm parameter values, this is
-about I<2^20 / 2^64>, that is about 1 chance in 2^44 merge runs.
+about I<2**20 / 2**64>, that is about one chance in I<2**44> merge runs.
 
 =back
 
@@ -681,6 +777,10 @@ but the worse for the false negative probability.
 
 If the available bandwidth is reasonable, the comparison will most likely
 be cpu-bound: the time is spent mainly on computing the initial checksum table.
+Thus if you are planning to check for differences quite often, consider
+maintaining a tuple checksum with a trigger, and possibly a key checksum
+as well, and invoke with C<--tuple-checksum> and either C<--key-checksum>
+or C<--use-key>.
 
 =head2 IMPLEMENTATION ISSUES
 
@@ -710,8 +810,7 @@ there is a lot of options the combination of which cannot all be tested.
 
 =head2 REFERENCES
 
-A paper was presented at a conference about this tool and its algorithm.
-
+A paper was presented at a conference about this tool and its algorithm:
 B<Remote Comparison of Database Tables> by I<Fabien Coelho>,
 In Third International Conference on
 Advances in Databases, Knowledge, and Data Applications (DBKDA),
@@ -720,31 +819,25 @@ ISBN: 978-1-61208-002-4.
 Copyright IARIA 2011.
 Online at L<http://www.thinkmind.org/index.php?view=article&articleid=dbkda_2011_2_10_30021>.
 
-The algorithm and script was inspired by:
-
-=over 2
-
+The algorithm and script was inspired by
 B<Taming the Distributed Database Problem: A Case Study Using MySQL>
 by I<Giuseppe Maxia> in B<Sys Admin> vol 13 num 8, Aug 2004, pp 29-40.
 See L<http://www.perlmonks.org/index.pl?node_id=381053> for details.
-
-=back
-
-In the Sys Admin paper, three algorithms are presented.
+In this paper, three algorithms are presented.
 The first one compares two tables with a checksum technique.
 The second one finds UPDATE or INSERT differences based on a 2-level
 (checksum and summary) table hierarchy. The algorithm is asymmetrical,
-as different queries are performed on the two tables to be compared.
+as different queries are performed on the two tables to compare.
 It seems that the network traffic volume is in I<k*(f+(n/f)+r)>,
 that it has a probabilistically-buggy merge procedure, and
 that it makes assumptions about the distribution of key values.
 The third algorithm looks for DELETE differences based on counting,
 with the implicit assumption that there are only such differences.
 
-The algorithm used here implements all three tasks. It is fully symmetrical.
-It finds UPDATE, DELETE and INSERT between the two tables.
-The checksum and summary hierarchical level idea is reused and generalized
-so as to reduce the algorithmic complexity.
+In contrast to this approach, our fully symmetrical algorithm implements
+all three tasks at once, to find UPDATE, DELETE and INSERT between the two
+tables. The checksum and summary hierarchical level idea is reused and
+generalized so as to reduce the algorithmic complexity.
 
 From the implementation standpoint, the script is as parametric as possible
 with many options, and makes few assumptions about table structures, types
@@ -755,7 +848,7 @@ and values.
 I<Michael Nacos> made a robust implementation L<http://pgdba.net/pg51g/>
 based on triggers. He also noted that although database contents are compared
 by the algorithm, the database schema differences can I<also> be detected
-by comparing system tables which describe these.
+by comparing system tables which describe them.
 
 I<Benjamin Mead Vandiver>'s PhD Thesis
 B<Detecting and Tolerating Byzantine Faults in Database Systems>,
@@ -771,25 +864,25 @@ see L<http://tinyurl.com/mysql-data-diff-algorithm>)
 (formerly L<http://sourceforge.net/projects/mysqltoolkit>).
 
 Some more links:
-L<http://www.altova.com/databasespy/>
-L<http://www.citrustechnology.com/solutions/data-comparison>
-L<http://comparezilla.sourceforge.net/>
-L<http://www.dbbalance.com/db_comparison.htm>
-L<http://www.dbsolo.com/datacomp.html>
-L<http://www.devart.com/dbforge/sql/datacompare/>
-L<http://www.dkgas.com/dbdiff.htm>
-L<http://www.programurl.com/software/sql-server-comparison.htm>
-L<http://www.red-gate.com/products/sql-development/sql-data-compare/>
-L<http://www.sql-server-tool.com/>
-L<http://www.webyog.com/>
-L<http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>
+L<http://www.altova.com/databasespy/>,
+L<http://www.citrustechnology.com/solutions/data-comparison>,
+L<http://comparezilla.sourceforge.net/>,
+L<http://www.dbbalance.com/db_comparison.htm>,
+L<http://www.dbsolo.com/datacomp.html>,
+L<http://www.devart.com/dbforge/sql/datacompare/>,
+L<http://www.dkgas.com/dbdiff.htm>,
+L<http://www.programurl.com/software/sql-server-comparison.htm>,
+L<http://www.red-gate.com/products/sql-development/sql-data-compare/>,
+L<http://www.sql-server-tool.com/>,
+L<http://www.webyog.com/>,
+L<http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>.
 
 If the tables to compare are in the same database, a simple SQL
 query can extract the differences. Assuming Tables I<T1> and I<T2>
 with primary key I<id> and non null contents I<data>, then their
 differences is summarized by the following query:
 
-	SELECT COALESCE(T1.id, T2.id) AS id,
+	SELECT COALESCE(T1.id, T2.id) AS key,
 	  CASE WHEN T1.id IS NULL THEN 'DELETE'
 	       WHEN T2.id IS NULL THEN 'INSERT'
 	       ELSE 'UPDATE'
@@ -809,9 +902,6 @@ If you have a fix, this is even better!
 The implementation does not do many sanity checks.
 For instance, it does not check that the declared key is indeed a key.
 
-Do not attempt to synchronize while the table is being used!
-Maybe I should lock the table?
-
 Although the algorithm can work with some normalized columns
 (say strings are trimmed, lowercased, Unicode normalized...),
 the implementation may not work at all.
@@ -820,12 +910,16 @@ Tables with binary keys or with NULL in keys may not work.
 Synchronizing tables with large object attributes may fail and result in
 strange error messages.
 
-The script handles one table at a time. In order to synchronize
-several linked tables, you must disable referential integrity checks,
-then synchronize each tables, then re-enable the checks.
+The script is really tested with integer and text types, issues may arise
+with other types.
 
-If the separator character appears within a value, the scripts fails in
-some ugly and unclear way while synchronizing.
+The script handles one table at a time. In order to synchronize several
+linked tables, you must disable referential integrity checks, then
+synchronize each tables, then re-enable the checks.
+
+There is no real attempt at doing some sensible identifier quoting,
+although quotes provided in the connection url are kept, so it may work
+after all for simple enough cases.
 
 There is no neat user interfaces, this is a earthly command line tool.
 This is not a bug, but a feature.
@@ -840,6 +934,40 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 =over 4
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
+
+Add C<--tuple-checksum> and C<--key-checksum> options so as to use existing
+possibly trigger-maintained checksums in the target tables instead of
+computing them on the fly.
+Add C<--checksum-computation> option to control how the checksum table is
+built, either C<CREATE ... AS ...> or C<CREATE ...; INSERT ...>.
+For mysql, rely directly on the count returned by C<CREATE ... AS> if available.
+Add C<--lock> option for locking tables, which is enabled when synchronizing.
+Improve asynchronous query handling, especially when creating checksum tables
+and getting initial table counts, and in some other cases.
+Remove redundant data transfers from checksum table under option C<--use-key>.
+Get rid of the separator when retrieving keys of differing tuples. Note that
+it is still used when computing checksums.
+Fix bug in bulk insert and delete key recovery under option C<--use-key>.
+Fix potential bug in handling complex conditions with C<--where>.
+Change default prefix to B<pgc_cmp> so that it is clearer that it belongs
+to B<pg_comparator>.
+Fix initial count query which was not started asynchronously under C<--tcs>.
+Ensure that if not null detection is in doubt, a column is assumed nullable
+and thus is coalesced.
+Fix query counters so that they are shared under C<--threads>.
+Fix threading for explicit cleanup phase.
+Warn if nullable key attributes are encountered.
+Make default driver for second connection be the same as first.
+Rename option C<--assume-size> as C<--size>.
+Add short documentation about C<--debug>.
+Multiple C<--debug> set DBI tracing levels as well.
+Improve the difference computation code so that the algorithm is more readable.
+Improve documentation.
+Add and improve comments in the code.
+The I<release> and I<hour> validations were run successfully
+on PostgreSQL 9.1.4 and MySQL 5.5.24.
+
+=item B<version 2.0.1> 2012-08-10 (r1159)
 
 Add C<--source-*> options to allow taking over DBI data source specification.
 Change default aggregate to C<sum> so that it works as expected by default
@@ -867,7 +995,7 @@ MySQL 5.5.24.
 
 Bug fix in the merge procedure by I<Robert Coup> that could result in
 some strange difference reports in corner cases, when there were collisions
-on the I<idc> in the initial checksum table.
+on the I<kcs> in the initial checksum table.
 Fix broken synchronization with '|' separator, raised by I<Aldemir Akpinar>.
 Warn about possible issues with large objects.
 Add C<--long-read-len> option as a possible way to circumvent such issues.
@@ -880,6 +1008,9 @@ Minor documentation improvements and fixes.
 Change default separator again, to '|'.
 Fix C<--where> option mishandling when counting, pointed out by
 I<Enrique Corona>.
+
+Post release note: the synchronisation is broken with the default separator
+in 1.8.1, do not use it, or use --separator='%'.
 
 =item B<version 1.8.0> 2012-01-08 (r1102)
 
@@ -895,7 +1026,7 @@ attribute names;
 Work around bulk inserts and deletes which may be undefined.
 More stats, more precise, possibly in CSV format.
 Add timeout and use-null options.
-Fix subtle bug which occurred sometimes on idc collisions in table I<T(0)>.
+Fix subtle bug which occurred sometimes on kcs collisions in table I<T(0)>.
 
 =item B<version 1.6.1> 2010-04-16 (r754)
 
@@ -975,7 +1106,7 @@ Minor doc updates.
 
 =item B<version 1.2> 2004-08-27 (r220)
 
-Added B<--show-all-keys> option for handling big chunks of deletes
+Added C<--show-all-keys> option for handling big chunks of deletes
 or inserts.
 
 =item B<version 1.1> 2004-08-26 (r210)
@@ -987,7 +1118,7 @@ Algorithmic section added to manual page.
 Thanks to I<Giuseppe Maxia> who asked for it.
 Various code cleanups.
 
-=item B<version 1.0> 2004-08-25  (r190)
+=item B<version 1.0> 2004-08-25 (r190)
 
 Initial revision.
 
@@ -999,31 +1130,32 @@ Copyright (c) 2004-@YEAR@, I<Fabien Coelho>
 <pg dot comparator at coelho dot net> L<http://www.coelho.net/>
 
 This software is distributed under the terms of the BSD Licence.
-Basically, you can do whatever you want, but you have to keep
-the license... and I'm not responsible for any consequences.
-Beware, you may lose your data or your hairs because of this software!
+Basically, you can do whatever you want, but you have to keep the license
+and I'm not responsible for any consequences.
+Beware, you may lose your data, your friends or your hairs because of this
+software!
 See the LICENSE file enclosed with the distribution for details.
 
 If you are very happy with this software, I would appreciate a postcard
-saying so (see my webpage for current address).
+saying so. See my webpage for current address.
 
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1159 $';
+my $revision = '$Revision: 1332 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
 
 # various option defaults
-my ($verb, $debug, $temp, $ask_pass, $env_pass) = (0, 0, 1, 0, undef);
-my ($factor, $max_ratio, $max_report, $max_levels) =  (7, 0.1, undef, 0);
-my ($report, $threads, $async, $cleanup, $skip, $clear) = (1, 0, 1, 0, 0, 0);
-my ($usekey, $usenull, $synchronize, $do_it, $do_trans) = (0, 1, 0, 0, 1);
-my ($prefix, $maskleft) = ('cmp', 1);
-my ($stats, $name, $key_size, $col_size) = (undef, 'none', 0, 0);
+my ($verb, $debug, $temp, $ask_pass, $factor, $clear) = (0, 0, 1, 0, 7, 0);
+my ($max_ratio, $max_levels, $report, $threads, $async) =  (0.1, 0, 1, 0, 1);
+my ($cleanup, $size, $usekey, $usenull, $synchronize) = (0, 0, 0, 1, 0);
+my ($do_it, $do_trans, $prefix, $ckcmp) = (0, 1, 'pgc_cmp', 'create');
+my ($maskleft, $name, $key_size, $col_size, $where) = (1, 'none', 0, 0, '');
 # condition, tests, max size of blobs, data sources...
-my ($where, $expect, $longreadlen, $source1, $source2);
+my ($expect, $longreadlen, $source1, $source2, $key_cs, $tup_cs, $do_lock,
+    $env_pass, $max_report, $stats);
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
@@ -1047,7 +1179,7 @@ sub usage($$$)
 # verb(2, "something...")
 sub verb($$)
 {
-  my ($level,$msg) = @_;
+  my ($level, $msg) = @_;
   print STDERR '#' x $level, " $msg\n" if $level<=$verb;
 }
 
@@ -1070,10 +1202,6 @@ sub parse_conn($)
   if ($c =~ /^(pg|my)(sql)?:\/\//) {
     $db = $1 . 'sql';
     $c =~ s/^\w+:\/\///;
-  }
-  else {
-    # default is PostgreSQL
-    $db = 'pgsql';
   }
 
   # split authority and path on first '/'
@@ -1160,30 +1288,35 @@ sub driver($)
 
 # store: dbh -> current asynchronous query
 # really needed only for mysql
-my %async_in_flight = ();
+my %current_async_query = ();
 
-# wait for the end of an asynchronous query
-sub async_wait($$)
+# wait for the end of an asynchronous query, and return last result
+sub async_wait($$$)
 {
-  my ($dbh, $db) = @_;
+  my ($dbh, $db, $from) = @_;
   die "must be in async mode!" unless $async;
-  # postgresql is simple
-  $dbh->pg_result() if $db eq 'pgsql';
-  # but not so mysql
-  # work around the fails if there is no current async query
-  if ($db eq 'mysql' and defined $async_in_flight{$dbh})
-  {
-    verb 5, "waiting for \"$async_in_flight{$dbh}\"";
+  return if not exists $current_async_query{$dbh};
+  verb 5, "async_wait $db $from: $current_async_query{$dbh}";
+  verb 6, "dbh is $dbh" if $debug;
+  my @res;
+  if ($db eq 'pgsql') {
+    @res = $dbh->pg_result();
+  }
+  elsif ($db eq 'mysql') {
+    # but not so mysql
+    # work around the fails if there is no current async query
     eval {
-      # hmmm... under -T -A we can have some
+      # hmmm... under -A we can have some
       # "Gathering async_query_in_flight results for the wrong handle"
-      $dbh->mysql_async_result();
+      # warn "undefined query?" if not defined $dbh->mysql_async_ready();
+      @res = $dbh->mysql_async_result();
     };
-    if ($@ and $debug) {
-      warn "$@";
+    if ($@ and $debug) { # keep it under the carpet...
+      die "$@";
     }
   }
-  $async_in_flight{$dbh} = undef;
+  delete $current_async_query{$dbh};
+  return @res;
 }
 
 # serialize database connection for handling through threads
@@ -1194,7 +1327,7 @@ sub dbh_serialize($$)
   if ($threads) {
     verb 5, "serializing db=$db";
     # wait for asynchronous query completion, if any
-    async_wait($dbh, $db) if $async;
+    async_wait($dbh, $db, 'serialize') if $async;
     # then serialize
     $_[0] = $dbh->take_imp_data
 	or die $dbh->errstr;
@@ -1214,6 +1347,7 @@ sub dbh_materialize($$)
 }
 
 # return DBI connection template for database
+# this may be overwritten with the --source[12] options
 sub source_template($)
 {
   my ($db) = @_;
@@ -1227,11 +1361,51 @@ sub source_template($)
   die "unexpected db ($db)";
 }
 
-# $dbh = conn($db,$base,$host,$port,$user,$pass,$source)
-# globals: $verb
-sub conn($$$$$$$)
+# global counters for the report
+my $query_nb = 0;   # number of queries
+my $query_sz = 0;   # size of queries
+my $query_fr = 0;   # fetched summary rows
+my $query_fr0 = 0;  # fetched checksum rows
+my $query_data = 0; # fetched data rows for synchronizing
+my $query_meta = 0; # special queries to metadata
+
+# async attributes for prepare/do
+my %attrs = ( 'pgsql' => {}, 'mysql' => {});
+
+# sql_do($dbh, $query)
+# execute an SQL query on a database
+# side effects: keep a count of queries and communications
+sub sql_do($$$)
 {
-  my ($db, $b, $h, $p, $u, $w, $src) = @_;
+  my ($dbh, $db, $query) = @_;
+  $query_nb++;
+  $query_sz += length($query);
+  verb 3, "$query_nb\t$query";
+  # for mysql, if there is a query under way?
+  # not needed for postgresql which will wait automatically
+  async_wait($dbh, $db, 'sql_do') if $async; # and $db eq 'mysql';
+  $current_async_query{$dbh} = $query; # keep track of current query
+  return $dbh->do($query, $attrs{$db});
+}
+
+# execute a parametric statement with col & key values
+sub sth_param_exec($$$$@)
+{
+  my ($doit, $what, $sth, $keys, @cols) = @_;
+  my $index = 1;
+  verb 3, "$what(@cols,@{$keys})";
+  # ??? $sth->execute(@cols, @$keys);
+  for my $val (@cols, @{$keys}) {
+    $sth->bind_param($index++, $val) if $doit;
+  }
+  $sth->execute() if $doit;
+}
+
+# $dbh = conn($db,$base,$host,$port,$user,$pass,$source,$table,$first)
+# globals: $verb
+sub conn($$$$$$$$$)
+{
+  my ($db, $b, $h, $p, $u, $w, $src, $table, $ro) = @_;
   my $s;
   if (not defined $src) {
     # derive data source specification from URL
@@ -1250,66 +1424,43 @@ sub conn($$$$$$$)
   my $dbh = DBI->connect($s, $u, $w,
 		{ RaiseError => 1, PrintError => 0, AutoCommit => 1 })
       or die $DBI::errstr;
+  # multiple --debug leads to DBI tracing levels
+  $dbh->trace($debug-1) if $debug>1;
   verb 4, "connected to $u\@$h:$p/$b";
-  # start a big transaction...
-  # LOCK TABLE $table IN EXCLUSIVE MODE;
-  $dbh->begin_work if $do_trans;
+  if ($do_trans) {
+    # start a big transaction...
+    $dbh->begin_work or die $dbh->errstr;
+  }
+  # handle locking...
+  if ($do_lock) {
+    verb 2, "locking $table";
+    if ($db eq 'pgsql') {
+      # for pgsql, the lock will be released at the end of the transaction
+      sql_do($dbh, $db, "LOCK TABLE $table IN ACCESS EXCLUSIVE MODE");
+    }
+    elsif ($db eq 'mysql') {
+      # for mysql, sigh... locks are seen as a weak transaction tool
+      sql_do($dbh, $db, "LOCK TABLES $table " . ($ro? 'READ': 'WRITE'));
+    }
+    else {
+      die "unexpected db $db";
+    }
+  }
   return $dbh;
 }
 
 # connect as a function for threading
-sub build_conn($$$$$$$)
+sub build_conn($$$$$$$$$)
 {
-  my ($db, $b, $h, $p, $u, $w, $s) = @_;
+  my ($db, $b, $h, $p, $u, $w, $s, $t, $ro) = @_;
   verb 2, "connecting...";
-  my $dbh = conn($db, $b, $h, $p, $u, $w, $s);
+  my $dbh = conn($db, $b, $h, $p, $u, $w, $s, $t, $ro);
   # max length of blobs to fetch, may be ignored by driver...
   $dbh->{LongReadLen} = $longreadlen if defined $longreadlen;
   $dbh->{LongTruncOk} = 0;
   # back to serialized form for threads
   dbh_serialize($dbh, $db);
   return $dbh;
-}
-
-# global counters for the report
-my $query_nb = 0;   # number of queries
-my $query_sz = 0;   # size of queries
-my $query_fr = 0;   # fetched summary rows
-my $query_fr0 = 0;  # fetched checksum rows
-my $query_data = 0; # fetched data rows for synchronizing
-my $query_meta = 0; # special queries to metadata
-
-# async attributes for prepare/do
-my %attrs = ( 'pgsql' => {}, 'mysql' => {});
-
-# sql_do($dbh, $query)
-# execute an SQL query on a database
-# actually used only for CREATE TABLE & some DROP TABLE
-# side effects: keep a count of queries and communications
-sub sql_do($$$)
-{
-  my ($dbh, $db, $query) = @_;
-  $query_nb++;
-  $query_sz += length($query);
-  verb 3, "$query_nb\t$query";
-  # for mysql, if there is a query under way?
-  # not needed for postgresql which will wait automatically
-  async_wait($dbh, $db) if $async and $db eq 'mysql';
-  $async_in_flight{$dbh} = "$query";
-  return $dbh->do($query, $attrs{$db});
-}
-
-# execute a parametric statement with col & key values
-sub sth_param_exec($$$$@)
-{
-  my ($doit, $what, $sth, $keys, @cols) = @_;
-  my $index = 1;
-  verb 3, "$what(@cols,[$sep/$keys])";
-  # ??? $sth->execute(@cols, split(/[$sep]/, $keys));
-  for my $val (@cols, split(/[$sep]/, $keys)) {
-    $sth->bind_param($index++, $val) if $doit;
-  }
-  $sth->execute() if $doit;
 }
 
 ###################################################################### DB UTILS
@@ -1336,7 +1487,8 @@ sub db_unquote($$)
   return $str;
 }
 
-# quote an identifier
+# quote an identifier. currently unused.
+# ??? what about $dbh->quote_identifier?
 sub db_quote($$)
 {
   my ($db, $str) = @_;
@@ -1358,16 +1510,11 @@ sub table_id($$)
 {
   my ($db, $table) = @_;
   # ??? quotes are kept
-  if ($table =~ /\./) {
-    # hmmm... does not make sense for mysql
-    return split '\.', $table;
-  }
-  elsif ($db eq 'mysql') {
-    return (undef, $table);
-  }
-  else {
-    return ('', $table);
-  }
+  # no 'schema' under MySQL... well, there is, but it is named 'database'...
+  return (undef, $table) if $db eq 'mysql';
+  # else $db eq 'pgsql'
+  return split '\.', $table if $table =~ /\./;
+  return ('', $table);
 }
 
 # get all attribute names, possibly ignoring a set of columns
@@ -1376,7 +1523,8 @@ sub get_table_attributes($$$$@)
   my ($dbh, $db, $base, $table, @ignore) = @_;
   dbh_materialize($dbh, $db);
   $query_meta++;
-  my $sth = $dbh->column_info($base, table_id($db,$table), '%');
+  async_wait($dbh, $db, 'attributes') if $async;
+  my $sth = $dbh->column_info($base, table_id($db, $table), '%');
   my ($row, %cols);
   while ($row = $sth->fetchrow_hashref()) {
     $cols{$$row{COLUMN_NAME}} = 1;
@@ -1395,46 +1543,94 @@ sub get_table_pkey($$$$)
   my ($dbh, $db, $base, $table) = @_;
   dbh_materialize($dbh, $db);
   $query_meta++;
+  async_wait($dbh, $db, 'pkey') if $async;
   my @keys = $dbh->primary_key($base, table_id($db, $table));
   dbh_serialize($dbh, $db);
   return @keys;
 }
 
-# tell whether a column is declared NOT NULL
-my %not_null_col = ();
-
-sub col_is_not_null($$$)
+# wrap column_info with a cache
+# dhpbt is db:host:port:base:table
+my %column_info = ();
+sub get_column_info($$$)
 {
   my ($dbh, $dhpbt, $col) = @_;
   my ($db, $base, $table) = (split /:/, $dhpbt)[0,3,4];
-  # use memoized information
-  return $main::not_null_col{"$dhpbt/$col"}
-    if exists $main::not_null_col{"$dhpbt/$col"};
-  # else try to get it
-  $query_meta++;
-  # ??? for some obscure reason, this fails is postgresql under -T
-  my $sth =
-  $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
-  die "column_info not implemented by driver" unless defined $sth;
-  my $h = $sth->fetchrow_hashref();
-  die "column information not returned" unless defined $h;
-  my $res = (defined ${$h}{NULLABLE} and ${$h}{NULLABLE}==0);
-  $sth->finish();
-  $main::not_null_col{"$dhpbt/$col"} = $res;
-  verb 4, "not null info: $db $base $table $col: $res";
-  return $res;
+  if (not exists $column_info{"$dhpbt/$col"})
+  {
+    # else try to get it
+    $query_meta++;
+    # ??? for some obscure reason, this fails is postgresql under -T
+    async_wait($dbh, $db, 'column info') if $async;
+    my $sth =
+      $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
+    die "column_info not implemented by driver" unless defined $sth;
+    my $h = $sth->fetchrow_hashref();
+    die "column information not returned" unless defined $h;
+    $column_info{"$dhpbt/$col"} = $h;
+    $sth->finish();
+  }
+  return $column_info{"$dhpbt/$col"};
 }
 
-# $number_of_rows = count($dbh,$db,$table)
-sub count($$$)
+# tell whether a column is declared NOT NULL, assume nullable if unknown
+sub col_is_not_null($$$)
 {
-  my ($dbh, $db, $table) = @_;
-  my $q = "SELECT COUNT(*) FROM $table";
+  my ($dbh, $dhpbt, $col) = @_;
+  my $h = get_column_info($dbh, $dhpbt, $col);
+  my $notnull = 0; # default is to assume that it is nullable
+  if (defined ${$h}{NULLABLE}) {
+    $notnull = ${$h}{NULLABLE}==0;
+  }
+  elsif (defined ${$h}{IS_NULLABLE}) {
+    $notnull = ${$h}{IS_NULLABLE} eq 'NO';
+  }
+  verb 6, "not null for $dhpbt:$col is $notnull" if $debug;
+  return $notnull;
+}
+
+# warn if attributes are nullable
+sub check_not_null($$$)
+{
+  my ($dbh, $dhpbt, $key) = @_;
+  for my $att (@$key) {
+    warn "$dhpbt $att key attribute is nullable..."
+      unless col_is_not_null($dbh, $dhpbt, $att);
+  }
+}
+
+# return type of column
+sub col_type($$$$)
+{
+  my ($dbh, $dhpbt, $db, $col) = @_;
+  my $h = get_column_info($dbh, $dhpbt, $col);
+  die 'column type not found' unless defined ${$h}{TYPE_NAME};
+  if ($db eq 'pgsql') {
+    return ${$h}{pg_type};
+  }
+  # else 'mysql'
+  my $type = ${$h}{TYPE_NAME};
+  # ??? workaround the full type name...
+  $type .= '(' . ${$h}{COLUMN_SIZE} . ')';
+  # if $type =~ /^(VAR)?CHAR$/i and ${$h}{COLUMN_SIZE};
+  return $type;
+}
+
+# count table rows
+# $sth = count($dbh,$db,$table,$condition)
+sub count($$$$)
+{
+  my ($dbh, $db, $table, $where) = @_;
+  my $query = "SELECT COUNT(*) FROM " . $table . ($where? " WHERE $where": '');
   $query_nb++;
-  $query_sz += length($q);
-  async_wait($dbh, $db) if $async;
-  verb 3, "$query_nb\t$q";
-  return $dbh->selectrow_array($q);
+  $query_sz += length($query);
+  async_wait($dbh, $db, 'count') if $async;
+  verb 3, "$query_nb\t$query";
+  $current_async_query{$dbh} = $query;
+  #print STDERR "attrs $db: ", %{$attrs{$db}}, "\n";
+  my $sth = $dbh->prepare($query, $attrs{$db}) or die $dbh->errstr;
+  $sth->execute() or die $dbh->errstr;
+  return $sth;
 }
 
 # return the average whole row size considered by the comparison
@@ -1460,7 +1656,7 @@ sub col_size($$$$)
     die "unexpected db ($db)";
   }
   verb 4, "col_size query: $q";
-  async_wait($dbh, $db) if $async;
+  async_wait($dbh, $db, 'col_size') if $async;
   return $dbh->selectrow_array($q);
 }
 
@@ -1482,8 +1678,7 @@ sub subs_null($$$$)
 {
   my ($fmt, $dbh, $dhpbt, $lref) = @_;
   my @l = ();
-  for my $s (@$lref)
-  {
+  for my $s (@$lref) {
     push @l, col_is_not_null($dbh, $dhpbt, $s)? $s: (subs($fmt, $s))[0];
   }
   return [@l];
@@ -1506,13 +1701,13 @@ sub concat($$$)
 # return template
 sub null_template($$$$)
 {
-  my ($db, $null, $algo, $size) = @_;
+  my ($db, $null, $algo, $sz) = @_;
   if ($db eq 'pgsql') {
     if ($null eq 'text') {
       return "COALESCE(%s::TEXT,'NULL')"
     }
     elsif ($null eq 'hash') {
-      return 'COALESCE(' . cksm_template($db, $algo, $size) . ',0)'
+      return 'COALESCE(' . cksm_template($db, $algo, $sz) . ',0)'
     }
     die "unexpected null $null";
   }
@@ -1521,24 +1716,34 @@ sub null_template($$$$)
       return "COALESCE(CAST(%s AS BINARY),'NULL')"
     }
     elsif ($null eq 'hash') {
-      return 'COALESCE(' . cksm_template($db, $algo, $size) . ',0)'
+      return 'COALESCE(' . cksm_template($db, $algo, $sz) . ',0)'
     }
     die "unexpected null $null";
   }
   die "unexpected db ($db)";
 }
 
+# get checksum type for a db & size
+sub checksum_type($$)
+{
+  my ($db, $sz) = @_;
+  return "INT$sz" if $db eq 'pgsql';
+  # hmmm... mysql does not have ints of all sizes
+  return $sz==8? 'BIGINT': 'INTEGER' if $db eq 'mysql';
+  die "unexpected database $db";
+}
+
 # generate a "cast" targetting a size in bytes for db
 sub cast_size($$$)
 {
-  my ($db, $s, $size) = @_;
+  my ($db, $s, $sz) = @_;
   if ($db eq 'pgsql') {
-    return "${s}::INT$size";
+    return "${s}::INT$sz";
   }
   elsif ($db eq 'mysql') {
-    # MySQL casts is a joke, you cannot really select any target type.
+    # MySQL casts are a joke, you cannot really select any target type.
     # so I reimplemented that in a function which returns a BIGINT whatever...
-    return "biginttoint$size(CAST($s AS SIGNED))";
+    return "biginttoint$sz(CAST($s AS SIGNED))";
   }
   die "unexpected db ($db)";
 }
@@ -1546,37 +1751,36 @@ sub cast_size($$$)
 # return checksum template for a non-NULL string.
 sub cksm_template($$$)
 {
-  my ($db, $algo, $size) = @_;
+  my ($db, $algo, $sz) = @_;
   if ($db eq 'pgsql') {
     if ($algo eq 'md5') {
       return cast_size($db,
-		       "DECODE(MD5(%s::TEXT),'hex')::BIT(" . 8*$size . ")",
-		       $size);
+		       "DECODE(MD5(%s::TEXT),'hex')::BIT(" . 8*$sz . ")", $sz);
     }
     elsif ($algo eq 'ck') {
-      return "CKSUM${size}((%s)::TEXT)";
+      return "CKSUM$sz((%s)::TEXT)";
     }
     die "unexpected algo $algo";
   }
   elsif ($db eq 'mysql') {
     if ($algo eq 'md5') {
-      return cast_size($db, "CONV(LEFT(MD5(%s),". 2*$size ."),16,10)", $size);
+      return cast_size($db, "CONV(LEFT(MD5(%s),". 2*$sz ."),16,10)", $sz);
     }
     elsif ($algo eq 'ck') {
-      return "CKSUM${size}(CAST(%s AS BINARY))";
+      return "CKSUM$sz(CAST(%s AS BINARY))";
     }
-    die "unexpected algo=$algo";
+    die "unexpected algo $algo";
   }
-  die "unexpected db ($db)";
+  die "unexpected database ($db)";
 }
 
 # checksum/hash one or more attributes
 sub ckatts($$$$)
 {
-  my ($db, $algo, $size, $atts) = @_;
+  my ($db, $algo, $sz, $atts) = @_;
   if ($db eq 'pgsql') {
     if (@$atts > 1) {
-      return join '', subs(cksm_template($db, $algo, $size),
+      return join '', subs(cksm_template($db, $algo, $sz),
 			   concat($db, $sep, $atts));
     }
     else {
@@ -1584,60 +1788,162 @@ sub ckatts($$$$)
       if ($algo eq 'md5') {
 	return cast_size($db,
 		   "COALESCE(DECODE(MD5($$atts[0]::TEXT),'hex'),''::BYTEA)" .
-			 "::BIT(" .  8*$size . ")", $size);
+			 "::BIT(" .  8*$sz . ")", $sz);
       }
-      else {
-	  return "CKSUM$size($$atts[0]::TEXT)";
+      else { # $algo eq 'ck'
+	return "CKSUM$sz($$atts[0]::TEXT)";
       }
     }
   }
   elsif ($db eq 'mysql') {
     if (@$atts > 1) {
-      return join '', subs(cksm_template($db, $algo, $size),
-	  concat($db, $sep, $atts));
+      return join '', subs(cksm_template($db, $algo, $sz),
+			   concat($db, $sep, $atts));
     }
     else {
       # simpler version when there is only one attribute...
       if ($algo eq 'md5') {
 	return cast_size($db,
-	      "COALESCE(CONV(LEFT(MD5($$atts[0]),". 2*$size ."),16,10),0)",
-			 $size);
+	      "COALESCE(CONV(LEFT(MD5($$atts[0]),". 2*$sz ."),16,10),0)", $sz);
       }
-      else {
-	return "CKSUM${size}(CAST($$atts[0] AS BINARY))";
+      else { # $algo eq 'ck'
+	return "CKSUM$sz(CAST($$atts[0] AS BINARY))";
       }
     }
   }
+  # else
   die "not implemented yet for db $db";
 }
 
-# $count = compute_checksum($dbh,$table,$skeys,$keys,$cols,$name,$skip)
-# globals: $temp $verb $cleanup $null $checksum $checksize
-sub compute_checksum($$$$$$$$)
+# generate variant of the list of pk<n>
+sub key_pk_get($$$$$)
 {
-  my ($dbh, $db, $table, $skeys, $keys, $cols, $name, $skip) = @_;
-  dbh_materialize($dbh, $db);
+  my ($dbh, $dhpbt, $db, $keys, $what) = @_;
+  my ($res, $i) = ('', 0);
+  my ($castatt, $cast, $as, $decl, $args) =
+    ($what eq 'CASTATT', $what eq 'CAST', $what eq 'AS',
+     $what eq 'DECL', $what eq 'LIST');
+  die "unexpected what=$what"
+    unless $castatt or $cast or $as or $decl or $args;
+  for my $att (@$keys) {
+    $res .= ', ' if $res;
+    $res .= 'CAST(' if $db eq 'mysql' and ($cast or $castatt);
+    $res .= "$att" if $castatt or $as;
+    $res .= ' AS ' if $as;
+    $res .= "pk$i" unless $castatt;
+    $res .= ' AS BINARY)' if $db eq 'mysql' and ($cast or $castatt);
+    $res .= '::TEXT' if $db eq 'pgsql' and ($cast or $castatt);
+    $res .= ' ' . col_type($dbh, $dhpbt, $db, $att) if $decl;
+    $i++;
+  }
+  return $res;
+}
+
+# build initial checksum table, dbh must be serialized
+# NOTE: if 'insert' the number of rows is returned or underway
+sub build_cs_table($$$$$$$$)
+{
+  my ($dbh, $dhpbt, $db, $table, $skeys, $keys, $cols, $name) = @_;
   verb 2, "building checksum table ${name}0";
   sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
-  # ??? CREATE + INSERT SELECT to get row count?
-  # would also allow to choose better types (int2/int4/int8...)?
+
+  # CREATE AS vs INSERT SELECT to get row count & choose types.
+  my $build_checksum =
+    "SELECT " .
+    # KEY CHECKSUM
+    # ??? hmmm... should rather use quote_nullable()? then how to unquote?
+    # always use 4 bytes for hash(key), because mask is 4 bytes anyway.
+    # however under usekey the key type is kept as such
+    ($usekey? "@$skeys": ckatts($db, $checksum, 4, $keys)) . " AS kcs, " .
+    # then TUPLE CHECKSUM
+    # this could be skipped if cols is empty...
+    # it would be somehow redundant with the previous one if same size
+    ckatts($db, $checksum, $checksize, [@$keys, @$cols]) . " AS tcs" .
+    # keep KEY, only if needed
+    ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'AS')) .
+    " FROM $table" . ($where? " WHERE $where": '');
+
   # ??? What about using quoted strings or using an array for values?
   # what would be the impact on the cksum? on pg/my compatibility?
-  sql_do($dbh, $db,
-	 "CREATE ${temp}TABLE ${name}0 AS " .
-	 "SELECT " .
-	 # ??? hmmm... should rather use quote_nullable()? then how to unquote?
-	 ($usekey? "@$skeys AS idc, ": concat($db, $sep, $skeys) . " AS id, ").
-	 # always use 4 bytes for hash(key), because mask is 4 bytes!
-	 ($usekey? '': ckatts($db, $checksum, 4, $keys) . " AS idc, ") .
-	 # this could be skipped if cols is empty...
-	 # it would be somehow redundant with the previous one if same size
-	 ckatts($db, $checksum, $checksize, [@$keys, @$cols]) . " AS cks " .
-	 "FROM $table " .
-	 ($where? "WHERE $where": ''));
-  # count should be available somewhere,
-  # but alas does not seem to be returned by do("CREATE TABLE ... AS ... ")
-  my $count = $skip? 0: count($dbh, $db, "${name}0");
+
+  my $count = -1;
+  if ($ckcmp eq 'create')
+  {
+    $count =
+      sql_do($dbh, $db, "CREATE ${temp}TABLE ${name}0 AS $build_checksum");
+    # count should be available somewhere,
+    # but alas does not seem to be returned by do("CREATE TABLE ... AS ... ")
+    # by pgsql, although it is returned by mysql
+  }
+  elsif ($ckcmp eq 'insert')
+  {
+    sql_do($dbh, $db,
+	   "CREATE ${temp}TABLE ${name}0 (" .
+	   # KEY CHECKSUM NN?
+	   'kcs ' .
+	($usekey? col_type($dbh, $dhpbt, $db, "@$keys"): checksum_type($db, 4)).
+	   # TUPLE CHECKSUM NN?
+	   ' NOT NULL, tcs ' . checksum_type($db, $checksize) . ' NOT NULL' .
+	   # KEY...
+	   ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'DECL')) .
+	   ");");
+    $count =
+      sql_do($dbh, $db, "INSERT INTO ${name}0(kcs, tcs" .
+	    ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'LIST')) .
+	     ") ". $build_checksum);
+  }
+  else {
+    die "unexpect checksum computation variant: $ckcmp";
+  }
+  return $count;
+}
+
+# may return a count statement if needed
+# BEWARE this is expected to be called JUST AFTER build_cs_table
+# which may get this information from a currently running asynchronous query
+sub start_count($$$$)
+{
+  my ($dbh, $dhpbt, $db, $table) = @_;
+  # not needed for mysql, as CREATE TABLE AS returns the created table size
+  return count($dbh, $db, $table, '') if $ckcmp eq 'create' and $db eq 'pgsql';
+}
+
+# get the row count
+# BEWARE this is expected to be called JUST AFTER start_count
+# and may get the information from a currently running asynchronous query
+sub get_count($$$$$)
+{
+  my ($dbh, $dhpbt, $db, $sth, $count) = @_;
+  if ($ckcmp eq 'create') { # get the current count
+    ($count) = async_wait($dbh, $db, 'count create async') if $async;
+    if ($db eq 'pgsql') {
+      ($count) = $sth->fetchrow_array();
+      $sth->finish();
+    }
+  }
+  elsif ($ckcmp eq 'insert') { # 'insert' under way, just wait for the result
+    ($count) = async_wait($dbh, $db, 'count insert async') if $async;
+    # else returned count was okay
+  }
+  else {
+    die "unexpect checksum computation variant: $ckcmp";
+  }
+  return $count;
+}
+
+# $count = compute_checksum($dbh,$dhpbt,$table,$skeys,$keys,$cols,$name,$size)
+# globals: $temp $verb $cleanup $null $checksum $checksize...
+sub compute_checksum($$$$$$$$$)
+{
+  my ($dbh, $dhpbt, $db, $table, $skeys, $keys, $cols, $name, $size) = @_;
+  dbh_materialize($dbh, $db);
+  check_not_null($dbh, $dhpbt, $keys);
+  my $count =
+    build_cs_table($dbh, $dhpbt, $db, $table, $skeys, $keys, $cols, $name);
+  if (not $size) { # we need to get the count
+    my $sth = start_count($dbh, $dhpbt, $db, "${name}0");
+    $count = get_count($dbh, $dhpbt, $db, $sth, $count);
+  }
   dbh_serialize($dbh, $db);
   return $count;
 }
@@ -1653,86 +1959,110 @@ sub aggregate($$)
 
 # compute a summary for a given level
 # assumes that dbh is materialized...
-sub compute_summary($$$$@)
+sub compute_summary($$$$$$@)
 {
-  my ($dbh, $db, $name, $level, @masks) = @_;
-  verb 2, "building summary table ${name}$level ($masks[$level])";
+  my ($dbh, $db, $name, $table, $skey, $level, @masks) = @_;
+  die "level must be positive, got $level" unless $level>0;
+  verb 2, "building summary for ${table}: ${name}$level ($masks[$level])";
   sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}${level}") if $cleanup;
+  # from table and attributes
+  my ($kcs, $tcs, $from) = ('kcs', 'tcs', ${name} . ($level-1));
+  if (defined $tup_cs and $level==1)
+  {
+    $tcs = $tup_cs;
+    $kcs = $key_cs if defined $key_cs;
+    $kcs = "@$skey" if $usekey; # must be simple!
+    $from = $table;
+  }
   sql_do($dbh, $db,
 	 "CREATE ${temp}TABLE ${name}${level} AS " .
 	 # the "& mask" is really a modulo operation
-	 "SELECT idc & $masks[$level] AS idc, " .
-	 aggregate($db, $agg) . "(cks) AS cks " .
-	 "FROM ${name}" . ($level-1) . " " .
-	 "GROUP BY idc & $masks[$level]");
+	 "SELECT ${kcs} & $masks[$level] AS kcs, " .
+	 aggregate($db, $agg) . "(${tcs}) AS tcs " .
+	 "FROM ${from} " .
+	 "GROUP BY ${kcs} & $masks[$level]");
 }
 
 # compute_summaries($dbh, $name, @masks)
 # globals: $verb $temp $agg $cleanup
-sub compute_summaries($$$@)
+sub compute_summaries($$$$$@)
 {
-  my ($dbh, $db, $name, @masks) = @_;
+  my ($dbh, $db, $name, $table, $skey, @masks) = @_;
   dbh_materialize($dbh, $db);
-  # compute cascade of summary tapbles
+  # compute cascade of summary tables
   for my $level (1 .. @masks-1) {
-    compute_summary($dbh, $db, $name, $level, @masks);
+    compute_summary($dbh, $db, $name, $table, $skey, $level, @masks);
   }
-  dbh_serialize($dbh, $db);
+  dbh_serialize($dbh, $db); # will async_wait if needed
 }
 
-# get info for investigated a list of idc (hopefully not too long)
-# $sth = selidc($dbh, $table, $mask, $get_id, @idc)
-# note that idc is a key but for level 0 where there may be collisions.
-sub selidc($$$$$@)
+# get info for investigated a list of key checksums (kcs)
+# $sth = selkcs($dbh, $table, $mask, $get_id, @kcs)
+# note that kcs is a key but for level 0 where there may be collisions.
+sub selkcs($$$$$@)
 {
-  my ($dbh, $db, $table, $mask, $get_id, @idc) = @_;
-  # ??? hmmm... idc and id are equal, but they are transfered twice
+  my ($dbh, $db, $table, $skey, $level, $mask, $get_key, @kcs) = @_;
+  my ($kcs, $tcs) = ('kcs', 'tcs');
+  if (defined $tup_cs and $level==0)
+  {
+    $tcs = $tup_cs;
+    $kcs = $key_cs if defined $key_cs;
+    $kcs = "@$skey" if $usekey;
+  }
   my $query =
-      'SELECT idc, cks' . ($get_id? ($usekey? ', idc': ', id'): '') .
+      "SELECT $kcs AS kcs, $tcs AS tcs" .
+        # if kcs==pk, do not transfer the key
+        (($get_key and not $usekey)?
+	 ', ' . key_pk_get(0, 0, $db, $skey, $tup_cs? 'AS': 'LIST'): '') .
       " FROM $table ";
   # the "& mask" is really a modulo operation
-  $query .= "WHERE idc & $mask IN (" . join(',', @idc) . ') ' if @idc;
-  $query .= 'ORDER BY idc' . (($get_id and not $usekey)? ', id': '');
+  $query .= "WHERE $kcs & $mask IN (" . join(',', @kcs) . ') ' if @kcs;
+  $query .= "ORDER BY $kcs";
+  $query .= ', ' . key_pk_get(0, 0, $db, $skey, $tup_cs? 'CASTATT': 'CAST')
+    if $get_key and not $usekey;
   # keep trac of running query
-  $async_in_flight{$dbh} = "$query" if $async;
-  my $sth = $dbh->prepare($query, $attrs{$db});
+  verb 3, "$query_nb\t$query";
+  $current_async_query{$dbh} = $query;
+  my $sth = $dbh->prepare($query, $attrs{$db}) or die $dbh->errstr;
   $query_nb++;
   $query_sz += length($query);
-  verb 3, "$query_nb\t$query";
   $sth->execute();
   return $sth;
 }
 
-# investigate an "idc/mask" list to show corresponding keys.
-# get_bulk_keys($dbh, $table, $nature, @idc_masks)
+# investigate an "kcs/mask" list to show corresponding keys.
+# get_bulk_keys($dbh, $table, $nature, @kcs_masks)
 # globals: $verb $report
-sub get_bulk_keys($$$$@)
+sub get_bulk_keys($$$$$@)
 {
-  my ($dbh, $db, $table, $nature, @idc_masks) = @_;
-  verb 1, "investigating $nature chunks (@idc_masks)";
+  my ($dbh, $db, $table, $kcs_att, $key_att, $nature, @kcs_masks) = @_;
+  verb 1, "investigating $nature chunks (@kcs_masks): $table $kcs_att $key_att";
 
   # shortcut, nothing to investigate
-  return [] unless @idc_masks;
+  return [] unless @kcs_masks;
 
   dbh_materialize($dbh, $db);
   my @keys = (); # results
   my $cond = ''; # select query condition. must not be empty.
-  for my $idc_mask (@idc_masks) {
-    my ($idc,$mask) = split '/', $idc_mask;
+  for my $kcs_mask (@kcs_masks) {
+    my ($kcs,$mask) = split '/', $kcs_mask;
     $cond .= ' OR ' if $cond;
-    $cond .= "idc & $mask = $idc";
+    $cond .= "$kcs_att & $mask = $kcs";
   }
+  $cond = "($where) AND ($cond)" if defined $tup_cs and $where;
   my $count = 0;
-  my $query = "SELECT id FROM $table WHERE $cond ORDER BY id";
+  my $query = "SELECT $key_att FROM $table WHERE $cond";
+  # ORDER BY?
+  # no asynchronous query: we need the result right away
   my $sth = $dbh->prepare($query);
   $query_nb++;
   $query_sz += length($query);
   verb 3, "$query_nb\t$query";
   $sth->execute();
-  while (my @row = $sth->fetchrow_array()) {
+  while (my (@key) = $sth->fetchrow_array()) {
     $count ++;
-    push @keys, $row[0];
-    print "$nature @row\n" if $report;
+    push @keys, [@key];
+    print "$nature @key\n" if $report;
   }
   dbh_serialize($dbh, $db);
 
@@ -1745,132 +2075,152 @@ sub table_cleanup($$$$)
   my ($dbh, $db, $name, $levels) = @_;
   verb 5, "cleaning $db/$name";
   dbh_materialize($dbh, $db);
-  for my $i (0 .. $levels) {
+  sql_do($dbh, $db, "DROP TABLE ${name}0") unless $tup_cs;
+  for my $i (1 .. $levels) {
     sql_do($dbh, $db, "DROP TABLE ${name}$i");
   }
-  dbh_serialize($dbh, $db);
+  dbh_serialize($dbh, $db); # async_wait if needed
 }
 
 ############################################################### MERGE ALGORITHM
 
 # this is the core of the comparison algorithm
 # compute differences by climbing up the tree, output result on the fly.
-# differences($dbh1, $dbh2, $db1, $db2, $name1, $name2, @masks)
+# differences($dbh1, $dbh2, $db1, $db2, $n1, $n2, $t1, $t2, $k1, $k2, @masks)
 # globals: $max_report $verb $report
-sub differences($$$$$$@)
+sub differences($$$$$$$$$$@)
 {
-  my ($dbh1, $dbh2, $db1, $db2, $name1, $name2, @masks) = @_;
+  my ($dbh1, $dbh2, $db1, $db2, $n1, $n2, $t1, $t2, $k1, $k2, @masks) = @_;
   my $level = @masks-1; # number of last summary table
   my ($mask, $count, $todo) = (0, 0, 1); # mask of previous table
   my (@insert, @update, @delete, @mask_insert, @mask_delete); # results
-  my @idc = ();
+  my @kcs = ();
 
   dbh_materialize($dbh1, $db1);
   dbh_materialize($dbh2, $db2);
 
   while ($level>=0 and $todo)
   {
-    my @next_idc = ();
-    verb 3, "investigating level=$level (@idc)";
+    my @next_kcs = ();
+    verb 3, "investigating level=$level (@kcs)";
 
-    if ($max_report && $level>0 && @idc>$max_report) {
+    if ($max_report && $level>0 && @kcs>$max_report) {
       print "giving up at level $level: too many differences.\n" .
 	    "\tadjust --max-ratio option to proceed " .
 	    "(current ratio is $max_ratio, $max_report diffs)\n" .
-	    "\tidc list length is " . scalar @idc . ": @idc\n";
+	    "\tkcs list length is " . scalar @kcs . ": @kcs\n";
       dbh_serialize($dbh1, $db1);
       dbh_serialize($dbh2, $db2);
       return;
     }
 
     # select statement handlers
-    my $s1 = selidc($dbh1, $db1, ${name1}.$level, $mask, !$level, @idc);
-    my $s2 = selidc($dbh2, $db2, ${name2}.$level, $mask, !$level, @idc);
+    my ($tab1, $tab2) = ($n1.$level, $n2.$level);
+    ($tab1, $tab2) = ($t1, $t2) if $tup_cs and $level==0;
+    my $s1 = selkcs($dbh1, $db1, ${tab1}, $k1, $level, $mask, !$level, @kcs);
+    my $s2 = selkcs($dbh2, $db2, ${tab2}, $k2, $level, $mask, !$level, @kcs);
 
     # wait for results...
     if ($async) {
-      async_wait($dbh1, $db1);
-      async_wait($dbh2, $db2);
+      async_wait($dbh1, $db1, 'diff 1');
+      async_wait($dbh2, $db2, 'diff 2');
     }
 
     # content of one row from the above select result
-    my (@r1, @r2);
+    my ($kcs1, $kcs2, $tcs1, $tcs2, @key1, @key2);
 
     # let us merge the two ordered select
     while (1)
     {
       # update current lists if necessary
-      @r1 = $s1->fetchrow_array(), @r1 && ($level? $query_fr++: $query_fr0++)
-	unless @r1 or not $s1->{Active};
-      @r2 = $s2->fetchrow_array(), @r2 && ($level? $query_fr++: $query_fr0++)
-	unless @r2 or not $s2->{Active};
+      if (not defined $kcs1 and $s1->{Active}) {
+	($kcs1, $tcs1, @key1) = $s1->fetchrow_array();
+	if (defined $kcs1) { # new row
+	  @key1 = ($kcs1) if !$level and $usekey; # fix key, not transferred
+	  $level? $query_fr++: $query_fr0++;
+	  #print "read 1: $kcs1, $tcs1", defined $key1? $key1:'', "\n";
+	}
+      }
+      if (not defined $kcs2 and $s2->{Active}) {
+	($kcs2, $tcs2, @key2) = $s2->fetchrow_array();
+	if (defined $kcs2) { # new row
+	  @key2 = ($kcs2) if !$level and $usekey; # fix key, not transferred
+	  $level? $query_fr++: $query_fr0++;
+	  #print "read 2: $kcs2, $tcs2", defined $key2? $key2:'', "\n";
+	}
+      }
       # nothing left on both side, merge is completed
-      last unless @r1 or @r2;
+      last unless defined $kcs1 or defined $kcs2;
       #debug: verb 6, "merging: @r1 / @r2" if $verb>=6;
       # else at least one of the list contains something
-      if (# both lists contain something
-	  @r1 && @r2 &&
-	  # their id checksums are equal
-	  $r1[0]==$r2[0] &&
+      if (# we are dealing with two tuples
+	  defined $kcs1 and defined $kcs2 and
+	  # their key checksums are equal
+	  $kcs1==$kcs2 and
 	  # for level 0, the keys are also equal
-	  ($level || $r1[2] eq $r2[2]))
+	  ($level or @key1 eq @key2))
       {
-	if ($r1[1] ne $r2[1]) { # but non matching checksums
+	die "unexpected undefined tuple checksum" # if not null is wrong...
+	  unless defined $tcs1 and defined $tcs2;
+	if ($tcs1 ne $tcs2) { # but non matching checksums
 	  if ($level) {
-	    push @next_idc, $r1[0]; # to be investigated at next level...
+	    push @next_kcs, $kcs1; # to be investigated at next level...
 	  } else {
 	    # the level-0 table keeps the actual key
 	    $count ++;
-	    push @update, $r1[2];
-	    print "UPDATE $r1[2]\n" if $report; # final result
+	    push @update, [@key1];
+	    print "UPDATE @key1\n" if $report; # final result
 	  }
 	}
 	# else the tuple checksums match, nothing to do!
 	# both tuples are consummed
-	@r1 = @r2 = ();
+	undef $kcs1; undef $tcs1; undef @key1;
+	undef $kcs2; undef $tcs2; undef @key2;
       }
       # if they do not match, one is missing or less than the other
       elsif (# right side is empty, only something on the left side
-	     (!@r2) ||
+	     not defined $kcs2 or
 	     # or the left side id checksum is less than right side
-	     (@r1 && ($r1[0]<$r2[0] ||
-	       # or special case for level 0 on idc collision
-	       (!$level && $r1[0]==$r2[0] && $r1[2] lt $r2[2]))))
+	     (defined $kcs1 and ($kcs1<$kcs2 or
+	       # or special case for level 0 on kcs collision
+	       (not $level and $kcs1==$kcs2 and @key1 lt @key2))))
       {
-	# more idc (/id) in table 1
+	# more kcs (/key) in table 1
 	if ($level) {
 	  # a whole chunck is empty on the right side, managed later
-	  push @mask_insert, "$r1[0]/$masks[$#masks]";
+	  push @mask_insert, "$kcs1/$masks[$#masks]";
 	} else {
 	  $count ++;
-	  push @insert, $r1[2];
-	  print "INSERT $r1[2]\n" if $report; # final result
+	  push @insert, [@key1];
+	  print "INSERT @key1\n" if $report; # final result
 	}
 	# left tuple is consummed
-	@r1 = ();
+	undef $kcs1; undef $tcs1; undef @key1;
       }
       # this could be a else
       elsif (# left side is empty, only something in the right side
-	     (!@r1) ||
+	     not defined $kcs1 or
 	     # or the right side id checksum is less than left side
-	     (@r2 && ($r1[0]>$r2[0] ||
-	       # special case for level 0 on idc collision
-	       (!$level && $r1[0]==$r2[0] && $r1[2] gt $r2[2]))))
+	     (defined $kcs2 and ($kcs1>$kcs2 or
+	       # special case for level 0 on kcs collision
+	       (not $level and $kcs1==$kcs2 and @key1 gt @key2))))
       {
-	# more idc in table 2
+	# more kcs in table 2
 	if ($level) {
 	  # a whole chunck is empty on the left side, managed later
-	  push @mask_delete, "$r2[0]/$masks[$#masks]";
+	  push @mask_delete, "$kcs2/$masks[$#masks]";
 	} else {
 	  $count ++;
-	  push @delete, $r2[2];
-	  print "DELETE $r2[2]\n" if $report; # final result
+	  push @delete, [@key2];
+	  print "DELETE @key2\n" if $report; # final result
 	}
 	# right tuple is consummed
-	@r2 = ();
+	undef $kcs2; undef $tcs2; undef @key2;
       }
       else {
-	die "this state should never happen";
+	die "this state should never happen\n" .
+	  " - 1: $kcs1, $tcs1, @key1\n" .
+	  " - 2; $kcs2, $tcs2, @key2\n";
       }
     }
     # close queries
@@ -1879,8 +2229,8 @@ sub differences($$$$$$@)
     # make ready for next round
     $level--; # next table! 0 is the initial checksum table
     $mask = pop @masks; # next mask
-    @idc = @next_idc; # idcs to be investigated on next round
-    $todo = @idc;
+    @kcs = @next_kcs; # kcss to be investigated on next round
+    $todo = @kcs;
   }
 
   dbh_serialize($dbh1, $db1);
@@ -1901,8 +2251,9 @@ GetOptions(
   "manual|man|m" => sub { usage(2, 0, ''); },
   # verbosity
   "verbose|v+" => \$verb,
-  "debug|d" => \$debug,
-  # parametrization of the algorithm
+  "debug|d+" => \$debug,
+  # parameterization of the algorithm
+  "checksum-computation|cc=s" => \$ckcmp,
   "checksum-function|checksum|cf|c=s" => \$checksum,
   "checksum-size|check-size|checksize|cs|z=i" => \$checksize,
   "aggregate-function|aggregate|agg|af|a=s" => \$agg,
@@ -1911,8 +2262,10 @@ GetOptions(
   "separator|s=s" => \$sep,
   # algorithm parameters and variants
   "use-key|uk|u!" => \$usekey,
+  "key-checksum|kcs=s" => \$key_cs,
   "use-null|usenull|un!" => \$usenull,
-  "assume-size|as=i" => \$skip,
+  "tuple-checksum|tup-checksum|tcs=s" => \$tup_cs,
+  "size=i" => \$size,
   "folding-factor|factor|f=i" => \$factor,
   "maximum-ratio|max-ratio|max|mr|x=f" => \$max_ratio,
   "maximum-levels|max-levels|ml=i" => \$max_levels,
@@ -1936,6 +2289,7 @@ GetOptions(
   "ask-password|ask-passwd|ask-pass|ap!" => \$ask_pass,
   "environment-password|env-password|env-passwd|env-pass|ep=s" => \$env_pass,
   "transaction|trans|tr!" => \$do_trans,
+  "lock!" => \$do_lock,
   # functions
   "synchronize|sync|S!" => \$synchronize,
   "do-it|do|D!" => \$do_it,
@@ -1954,13 +2308,21 @@ GetOptions(
   "version|V" => sub { print "$0 version is $script_version\n"; exit 0; }
 ) or die "$! (try $0 --help)";
 
+# propagate expect specification
 $max_report = $expect if defined $expect and not defined $max_report;
+
+# set default locking if not set
+$do_lock = $synchronize if not defined $do_lock;
 
 # handle stats option
 $stats = 'txt' if defined $stats and $stats eq '';
 
-die "invalid value for stats option, expecting 'txt' or 'csv', got '$stats'"
-    unless not defined $stats or $stats =~ /^(csv|txt)$/;
+die "invalid value for stats option: $stats  for 'txt' or 'csv'"
+  unless not defined $stats or $stats =~ /^(csv|txt)$/;
+
+# consistency check for --cc
+die "invalid checksum computation variant: '$ckcmp' for 'create' or 'insert'"
+  unless $ckcmp eq 'create' or $ckcmp eq 'insert';
 
 # minimal check for provided data sources
 die "data source 1 must be a DBI connection string: $source1"
@@ -1974,11 +2336,10 @@ if ($threads and not $debug)
 {
   my $changed = 0;
   # it seems that statements are closed when playing with threads
-  # so that commits & temporary removal are done automatically...
-  $temp = 0, $changed++ unless $temp==0;
+  # so we cannot use transactions.
   $do_trans = 0, $changed++ unless $do_trans==0;
-  $clear = 1, $changed++ unless $clear==1;
   warn "WARNING $changed options fixed for threads..." if $changed;
+  # note: do_lock & temp==0 seems a bad idea.
 }
 
 # fix --temp or --no-temp option
@@ -1999,6 +2360,7 @@ usage(0, 0, 'expecting 2 arguments') unless @ARGV == 2;
 my ($db1, $u1, $w1, $h1, $p1, $b1, $t1, $k1, $c1) = parse_conn(shift);
 
 # set defaults and check minimum definitions.
+$db1 = 'pgsql' unless defined $db1;
 $u1 = $ENV{USER} unless defined $u1;
 $h1 = 'localhost' unless defined $h1;
 $p1 = 5432 if not defined $p1 and $db1 eq 'pgsql';
@@ -2012,6 +2374,7 @@ die "no table on first connection" unless defined $t1 or defined $source1;
 my ($db2, $u2, $w2, $h2, $p2, $b2, $t2, $k2, $c2) = parse_conn(shift);
 
 # fix some default values for connection 2
+$db2 = $db1 unless defined $db2;
 $u2 = $u1 unless defined $u2;
 $h2 = 'localhost' unless defined $h2;
 $p2 = 5432 if not defined $p2 and $db2 eq 'pgsql';
@@ -2024,7 +2387,7 @@ if ($async)
 {
   if ($db1 eq 'pgsql' or $db2 eq 'pgsql')
   {
-    use DBD::Pg qw(:async);
+    use DBD::Pg qw(:async); # just for 1 & 4 constants
     $attrs{pgsql} = { pg_async => PG_ASYNC + PG_OLDQUERY_WAIT };
   }
   if ($db1 eq 'mysql' or $db2 eq 'mysql')
@@ -2036,16 +2399,16 @@ if ($async)
 }
 
 die "null should be 'text' or 'hash', got $null"
-    unless $null =~ /^(text|hash)$/i;
+  unless $null =~ /^(text|hash)$/i;
 
 die "checksum should be 'md5' or 'ck', got ($checksum)"
-    unless $checksum =~ /^(md5|ck)$/i;
+  unless $checksum =~ /^(md5|ck)$/i;
 
 die "checksize must be 2, 4 or 8, got ($checksize)"
-    unless $checksize =~ /^[248]$/;
+  unless $checksize =~ /^[248]$/;
 
 die "aggregate must be 'xor' or 'sum', got ($agg)"
-    unless $agg =~ /^(xor|sum)$/i;
+  unless $agg =~ /^(xor|sum)$/i;
 
 # database connection...
 if (defined $env_pass and not defined $w1)
@@ -2074,31 +2437,50 @@ if ($ask_pass and not defined $w2)
 
 # some sanity checks, that are skipped under debugging so as to test
 die "sorry, threading does not seem to work with PostgreSQL driver"
-    if not $debug and $threads and ($db1 eq 'pgsql' or $db2 eq 'pgsql');
+  if not $debug and $threads and ($db1 eq 'pgsql' or $db2 eq 'pgsql');
+
+# consistency check for --lock & --transaction
+if ($do_lock and ($db1 eq 'pgsql' or $db2 eq 'pgsql')) {
+  die "--lock requires --transaction for pgsql" unless $do_trans;
+}
 
 # there is signed (pg)/unsigned (my) issue with key xor4 in mixed mode
 # at least with md5. note that the answer seems okay in the end, but more
 # path than necessary are investigated.
 die "sorry, xor aggregate does not work well in mixed mode"
-    if not $debug and $agg eq 'xor' and $db1 ne $db2;
+  if not $debug and $agg eq 'xor' and $db1 ne $db2;
+
+# consistency checks for --use-(key|tuple)(-checksum)?
+die "--use-key and --key-checksum are not compatible"
+  if $usekey and defined $key_cs;
+
+die "--tuple-checksum implies either --use-key or --key-checksum"
+  if defined $tup_cs and not ($usekey or defined $key_cs);
+
+die "--key-checksum implies --tuple-checksum"
+  if defined $key_cs and not defined $tup_cs;
 
 # ??? what about other checks?
 
-########################################################### THREADED OPERATIONS
+########################################## THREADED AND NON THREADED OPERATIONS
 
-#  .   options...
-# | |  connection1 || connection2
-#  .   get default columns if necessary
-# | |  count1 || count2
-#  .   compute mask list
-# | |  checksum1 || checksum2
-#  ?   artificial synchro to get current time
-# | |  summary1 || summary2
-#  .   compute differences
-# | |  bulk1 || bulk2
-#  .   synchronize if required
-# | |  cleanup
-#  .   commit
+#    .   initializations
+#    .   parse options
+# 0 | |  connection1 // connection2        # connect to databases
+#   | |  begin1      // begin2             # start transaction
+#   | |  lock1       // lock2              # lock tables
+#    .   get default columns if necessary
+# 1 | |  checksum1 // checksum2            # build checksum tables
+#   | |  count1    // count2               # get table sizes
+#    .   compute masks based on sizes
+# 2 | |  summary1 // summary2              # build summary tables
+#    *   compute differences               # start recursive algorithm
+# 3 | |  bulk1 // bulk2                    # get keys of bulk inserts/deletes
+#    *   synchronize if required           # synchronize table contents
+# 4 | |  cleanup1 // cleanup2              # remove "temporary" tables
+#    .   commit                            # close transaction
+#    .   disconnect
+#    .   report if required
 
 use Time::HiRes qw(gettimeofday tv_interval);
 my ($t0, $tcks, $tsum, $tmer, $tblk, $tsyn, $tclr, $tend);
@@ -2108,12 +2490,25 @@ verb 1, "connecting...";
 my ($thr1, $thr2);
 if ($threads)
 {
+  # share global counters
+  # ??? should also take care of race conditions...
   require threads;
-  ($thr1) = threads->new(\&build_conn, $db1, $b1, $h1, $p1, $u1, $w1, $source1)
-    or die "cannot create thread 1-1";
+  require threads::shared;
+  threads::shared::share(\$query_nb);
+  threads::shared::share(\$query_sz);
+  threads::shared::share(\$query_fr);
+  threads::shared::share(\$query_fr0);
+  threads::shared::share(\$query_data);
+  threads::shared::share(\$query_meta);
 
-  ($thr2) = threads->new(\&build_conn, $db2, $b2, $h2, $p2, $u2, $w2, $source2)
-    or die "cannot create thread 2-1";
+  ($thr1) = threads->new(\&build_conn,
+			 $db1, $b1, $h1, $p1, $u1, $w1, $source1, $t1, 1)
+    or die "cannot create thread 1-0";
+
+  ($thr2) = threads->new(\&build_conn,
+			 $db2, $b2, $h2, $p2, $u2, $w2, $source2, $t2,
+			 !$synchronize)
+    or die "cannot create thread 2-0";
 
   verb 1, "waiting for connexions and counts...";
   ($dbh1) = $thr1->join();
@@ -2121,8 +2516,9 @@ if ($threads)
 }
 else
 {
-  ($dbh1) = build_conn($db1, $b1, $h1, $p1, $u1, $w1, $source1);
-  ($dbh2) = build_conn($db2, $b2, $h2, $p2, $u2, $w2, $source2);
+  ($dbh1) = build_conn($db1, $b1, $h1, $p1, $u1, $w1, $source1, $t1, 1);
+  ($dbh2) = build_conn($db2, $b2, $h2, $p2, $u2, $w2, $source2, $t2,
+		       !$synchronize);
 }
 
 # set defaults...
@@ -2130,14 +2526,14 @@ if (not defined $k1)
 {
   $k1 = [get_table_pkey($dbh1, $db1, $b1, $t1)];
   warn "default key & attribute on first connection but not on second..."
-      if defined $k2;
+    if defined $k2;
 }
 if (not defined $c1)
 {
   $c1 = [get_table_attributes($dbh1, $db1, $b1, $t1, @$k1)];
   # warn, as this may lead to unexpected results...
   warn "default attributes on first connection but not on second..."
-      if defined $c2;
+    if defined $c2;
 }
 
 $k2 = $k1 unless defined $k2;
@@ -2184,36 +2580,66 @@ dbh_serialize($dbh2, $db2);
 
 verb 1, "checksumming...";
 my ($count1, $count2);
-if ($threads)
+if ($tup_cs) # no checksum table to compute
 {
-  ($thr1) =
-    threads->new(\&compute_checksum,
-      $dbh1, $db1, $t1, $usekey? $k1: $tk1, $pk1, $pc1, $name1, $skip)
-    or die "cannot create thread 1-1";
-
-  ($thr2) =
-    threads->new(\&compute_checksum,
-      $dbh2, $db2, $t2, $usekey? $k2: $tk2, $pk2, $pc2, $name2, $skip)
-    or die "cannot create thread 2-1";
-
-  verb 1, "waiting for connexions and counts...";
-  ($count1) = $thr1->join();
-  ($count2) = $thr2->join();
+  verb 2, "using provided checksum '$tup_cs'...";
+  check_not_null($dbh1, $dhpbt1, $k1);
+  check_not_null($dbh2, $dhpbt2, $k2);
+  if (not $size) # but count is needed
+  {
+    verb 2, "computing sizes...";
+    die "not implemented" if $threads;
+    # ELSE no thread
+    my $s1 = count($dbh1, $db1, $t1, $where);
+    my $s2 = count($dbh2, $db2, $t2, $where);
+    if ($async) {
+      async_wait($dbh1, $db1, 'count 1');
+      async_wait($dbh2, $db2, 'count 2');
+    }
+    ($count1) = $s1->fetchrow_array();
+    ($count2) = $s2->fetchrow_array();
+    $s1->finish();
+    $s2->finish();
+  }
 }
-else
+else # must compute checksum table
 {
-  ($count1) =
-    compute_checksum($dbh1, $db1, $t1,
-		     $usekey? $k1: $tk1, $pk1, $pc1, $name1, $skip);
-  ($count2) =
-    compute_checksum($dbh2, $db2, $t2,
-		     $usekey? $k2: $tk2, $pk2, $pc2, $name2, $skip);
+  if ($threads) {
+    ($thr1) = threads->new(\&compute_checksum, $dbh1, $dhpbt1, $db1,
+			   $t1, $usekey? $k1: $tk1, $pk1, $pc1, $name1, $size)
+      or die "cannot create thread 1-1";
+
+    ($thr2) = threads->new(\&compute_checksum, $dbh2, $dhpbt2, $db2,
+			   $t2, $usekey? $k2: $tk2, $pk2, $pc2, $name2, $size)
+      or die "cannot create thread 2-1";
+
+    verb 1, "waiting for connexions and possibly counts...";
+    ($count1) = $thr1->join();
+    ($count2) = $thr2->join();
+  }
+  else { # no thread
+    check_not_null($dbh1, $dhpbt1, $k1);
+    check_not_null($dbh2, $dhpbt2, $k2);
+    # CREATE TABLE & SELECT
+    ($count1) = build_cs_table($dbh1, $dhpbt1, $db1, $t1,
+			       $usekey? $k1: $tk1, $pk1, $pc1, $name1);
+    ($count2) = build_cs_table($dbh2, $dhpbt2, $db2, $t2,
+			       $usekey? $k2: $tk2, $pk2, $pc2, $name2);
+    # SELECT COUNT
+    if (not $size) {
+      # decomposition is needed to take advantage of asynchronous queries
+      my ($s1) = start_count($dbh1, $dhpbt1, $db1, "${name1}0");
+      my ($s2) = start_count($dbh2, $dhpbt2, $db2, "${name2}0");
+      ($count1) = get_count($dbh1, $dhpbt1, $db1, $s1, $count1);
+      ($count2) = get_count($dbh2, $dhpbt2, $db2, $s2, $count2);
+    }
+  }
 }
 
+verb 5, "count1=$count1 count2=$count2" if not $size;
 verb 1, "computing size and masks after folding factor...";
-$count1 = $count2 = $skip if $skip;
-
-my $size = $count1>$count2? $count1: $count2; # MAX size of both tables
+$count1 = $count2 = $size if $size;
+$size = $count1>$count2? $count1: $count2; # MAX size of both tables
 
 # stop at this number of differences
 $max_report = $max_ratio * $size unless defined $max_report;
@@ -2243,15 +2669,25 @@ my $levels = @masks;
 splice @masks, $max_levels if $max_levels; # cut-off option
 verb 3, "masks=(@masks)";
 
-$tcks = [gettimeofday] if $stats;
+if ($stats) {
+  # under skip async nothread, the checksum may still be underway
+  if ($async and not $threads and not $size) {
+    async_wait($dbh1, $db1, 'stats 1');
+    async_wait($dbh2, $db2, 'stats 2');
+  }
+  $tcks = [gettimeofday];
+}
+# note: if stats are not required, asynchronous queries may still be underway
 
 verb 1, "building summary tables...";
 if ($threads)
 {
-  $thr1 = threads->new(\&compute_summaries, $dbh1, $db1, $name1, @masks)
+  $thr1 = threads->new(\&compute_summaries, $dbh1, $db1,
+		       $name1, $t1, $k1, @masks)
     or die "cannot create thread 1-2";
 
-  $thr2 = threads->new(\&compute_summaries, $dbh2, $db2, $name2, @masks)
+  $thr2 = threads->new(\&compute_summaries, $dbh2, $db2,
+		       $name2, $t2, $k2, @masks)
     or die "cannot create thread 2-2";
 
   $thr1->join();
@@ -2264,12 +2700,12 @@ else
   # hmmm... possibly try to parallelize with asynchronous queries...
   # no threads here, no need to materialize and serialize handlers
   for my $level (1 .. @masks-1) {
-    compute_summary($dbh1, $db1, $name1, $level, @masks);
-    compute_summary($dbh2, $db2, $name2, $level, @masks);
+    compute_summary($dbh1, $db1, $name1, $t1, $k1, $level, @masks);
+    compute_summary($dbh2, $db2, $name2, $t2, $k2, $level, @masks);
   }
   if ($async) {
-    async_wait($dbh1, $db1);
-    async_wait($dbh2, $db2);
+    async_wait($dbh1, $db1, 'summary 1');
+    async_wait($dbh2, $db2, 'summary 2');
   }
 }
 
@@ -2277,7 +2713,8 @@ $tsum = [gettimeofday] if $stats;
 
 verb 1, "looking for differences...";
 my ($count, $ins, $upt, $del, $bins, $bdel) =
-  differences($dbh1, $dbh2, $db1, $db2, $name1, $name2, @masks);
+  differences($dbh1, $dbh2, $db1, $db2, $name1, $name2,
+	      $t1, $t2, $k1, $k2, @masks);
 verb 2, "differences done";
 
 $tmer = [gettimeofday] if $stats;
@@ -2294,13 +2731,27 @@ if ((defined @$bins and @$bins) or (defined $bdel and @$bdel))
   # this cost two full table-0 scans, one on each side...
   if ($threads)
   {
-    # hmmm... thread is useless if list is empty
-    $thr1 = threads->new(\&get_bulk_keys,
-			 $dbh1, $db1, "${name1}0", 'INSERT', @$bins)
+    # hmmm... thread is useless if the list is empty
+    $thr1 = threads->new(\&get_bulk_keys, $dbh1, $db1,
+			 # table
+			 defined $tup_cs? $t1: "${name1}0",
+			 # key checksum attribute
+	        defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k1": 'kcs',
+			 # key attribute
+		defined $tup_cs? key_pk_get(0, 0, $db1, $k1, 'AS'):
+		  $usekey? 'kcs': key_pk_get(0, 0, $db1, $k1, 'LIST'),
+			 'INSERT', @$bins)
       or die "cannot create thread 1-3";
 
-    $thr2 = threads->new(\&get_bulk_keys,
-			 $dbh2, $db2, "${name2}0", 'DELETE', @$bdel)
+    $thr2 = threads->new(\&get_bulk_keys, $dbh2, $db2,
+			 # table
+			 defined $tup_cs? $t2: "${name2}0",
+			 # key checksum attribute
+		defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k2": 'kcs',
+			 # key attribute
+		defined $tup_cs? key_pk_get(0, 0, $db2, $k2, 'AS'):
+		  $usekey? 'kcs': key_pk_get(0, 0, $db2, $k2, 'LIST'),
+			 'DELETE', @$bdel)
       or die "cannot create thread 2-3";
 
     $insb = $thr1->join();
@@ -2308,8 +2759,24 @@ if ((defined @$bins and @$bins) or (defined $bdel and @$bdel))
   }
   else
   {
-    $insb = get_bulk_keys($dbh1, $db1, "${name1}0", 'INSERT', @$bins);
-    $delb = get_bulk_keys($dbh2, $db2, "${name2}0", 'DELETE', @$bdel);
+    $insb = get_bulk_keys($dbh1, $db1,
+			  # table
+			  defined $tup_cs? $t1: "${name1}0",
+			  # key checksum attribute
+		defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k1": 'kcs',
+			  # key attribute
+		defined $tup_cs? key_pk_get(0, 0, $db1, $k1, 'AS'):
+		  $usekey? 'kcs': key_pk_get(0, 0, $db1, $k1, 'LIST'),
+			  'INSERT', @$bins);
+    $delb = get_bulk_keys($dbh2, $db2,
+			  # table
+			  defined $tup_cs? $t2: "${name2}0",
+			  # key checksum attribute
+	        defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k2": 'kcs',
+			  # key attribute
+		defined $tup_cs? key_pk_get(0, 0, $db2, $k2, 'AS'):
+		  $usekey? 'kcs': key_pk_get(0, 0, $db2, $k2, 'LIST'),
+			  'DELETE', @$bdel);
   }
 
   # ??? fix?
@@ -2336,6 +2803,7 @@ $tblk = [gettimeofday] if $stats;
 
 # perform an actual synchronization of data
 if ($synchronize and
+    # is there something to do?
     (@$del or @$ins or @$upt or defined $insb or defined $delb))
 {
   verb 1, "synchronizing...";
@@ -2343,8 +2811,11 @@ if ($synchronize and
   dbh_materialize($dbh1, $db1);
   dbh_materialize($dbh2, $db2);
 
+  # if the overall comparison is not under a transaction,
+  # the synchronization is nevertheless.
   $dbh2->begin_work if $do_it and not $do_trans;
 
+  # build query helpers
   my $where_k1 = (join '=? AND ', @$k1) . '=?';
   my $where_k2 = (join '=? AND ', @$k2) . '=?';
   my $set_c2 = (join '=?, ', @$c2) . '=?';
@@ -2353,7 +2824,7 @@ if ($synchronize and
   if (@$del or @$delb)
   {
     my $del_sql = "DELETE FROM $t2 WHERE " .
-	($where? "$where AND ": '') . $where_k2;
+	($where? "($where) AND ": '') . $where_k2;
     verb 2, $del_sql;
     my $del_sth = $dbh2->prepare($del_sql) if $do_it;
     for my $d (@$del, @$delb) {
@@ -2366,11 +2837,11 @@ if ($synchronize and
   my ($val_sql, $val_sth);
   if ($c1 and @$c1)
   {
-      $val_sql = "SELECT " . join(',', @$c1) . " FROM $t1 WHERE " .
-	  ($where? "$where AND ": '') . $where_k1;
-      verb 2, $val_sql;
-      $val_sth = $dbh1->prepare($val_sql)
-	  if @$ins or @$insb or @$upt;
+    $val_sql = "SELECT " . join(',', @$c1) . " FROM $t1 WHERE " .
+               ($where? "($where) AND ": '') . $where_k1;
+    verb 2, $val_sql;
+    $val_sth = $dbh1->prepare($val_sql)
+      if @$ins or @$insb or @$upt;
   }
 
   # insert rows
@@ -2405,7 +2876,7 @@ if ($synchronize and
   {
     die "there must be some columns to update" unless $c1;
     my $upt_sql = "UPDATE $t2 SET $set_c2 WHERE " .
-	($where? "$where AND ": '') . $where_k2;
+	($where? "($where) AND ": '') . $where_k2;
     verb 2, $upt_sql;
     my $upt_sth = $dbh2->prepare($upt_sql) if $do_it;
     for my $u (@$upt)
@@ -2423,6 +2894,7 @@ if ($synchronize and
     # $upt_sth
   }
 
+  # close synchronization transaction if any
   $dbh2->commit if $do_it and not $do_trans;
 
   dbh_serialize($dbh1, $db1);
@@ -2433,7 +2905,7 @@ if ($synchronize and
       "*** WARNING ***\n",
       "\n",
       "The synchronization was not performed, sorry...\n",
-      "Also set non documented option --do-it if you really want to it.\n",
+      "Also set non documented option --do-it if you really want to do it.\n",
       "BEWARE that you may lose your data and your friends!\n",
       "Back-up before running a synchronization!\n",
       "\n"
@@ -2446,11 +2918,11 @@ if ($clear)
 {
   verb 4, "clearing...";
   my $levels = @masks - 1;
-  if ($threads and $debug)
+  if ($threads)
   {
-    $thr1 = threads->new(&table_cleanup, $dbh1, $db1, $name1, $levels)
+    $thr1 = threads->new(\&table_cleanup, $dbh1, $db1, $name1, $levels)
 	or die "cannot create thread 1-4";
-    $thr2 = threads->new(&table_cleanup, $dbh2, $db2, $name2, $levels)
+    $thr2 = threads->new(\&table_cleanup, $dbh2, $db2, $name2, $levels)
 	or die "cannot create thread 2-4";
     $thr1->join();
     $thr2->join();
@@ -2469,11 +2941,24 @@ $tclr = [gettimeofday];
 dbh_materialize($dbh1, $db1);
 dbh_materialize($dbh2, $db2);
 
+# unlock for mysql
+if ($do_lock)
+{
+  if ($db1 eq 'mysql') {
+    sql_do($dbh1, $db1, "UNLOCK TABLES");
+    async_wait($dbh1, $db1, 'unlock 1') if $async;
+  }
+  if ($db2 eq 'mysql') {
+    sql_do($dbh2, $db2, "UNLOCK TABLES");
+    async_wait($dbh2, $db2, 'unlock 2') if $async;
+  }
+}
+
 # end of the big transactions...
 if ($do_trans)
 {
-  $dbh1->commit;
-  $dbh2->commit;
+  $dbh1->commit or die $dbh1->errstr;
+  $dbh2->commit or die $dbh2->errstr;
 }
 
 # final timestamp
@@ -2494,8 +2979,8 @@ if ($stats)
 # @$del @$delb: key delete (ind & bulks)
 
 # close both connections
-$dbh1->disconnect();
-$dbh2->disconnect();
+$dbh1->disconnect() or warn $dbh1->errstr;
+$dbh2->disconnect() or warn $dbh2->errstr;
 
 #################################################################### STATISTICS
 
@@ -2509,17 +2994,21 @@ sub delay($$)
 
 if (defined $stats)
 {
-  # ??? some these statistics are not trustworthy when running with threads
+  # ??? some of these statistics are not trustworthy when running with threads
 
+  # build options as a bit vector
   my $options =
-      ($async << 7) |
-      ($usenull << 6) |
-      ($maskleft << 5) |
-      (($temp?1:0) << 4) |
-      ($do_trans << 3) |
-      ($usekey << 2) |
-      ($threads << 1) |
-      $synchronize;
+      (($tup_cs?1:0) << 10) |   # --tuple-checksum=...
+      (($key_cs?1:0) << 9) |    # --key-checksum=...
+      ($do_lock << 8) |         # --lock
+      ($async << 7) |           # --asynchronous
+      ($usenull << 6) |         # --use-null
+      ($maskleft << 5) |        # --mask-left
+      (($temp?1:0) << 4) |      # --temporary
+      ($do_trans << 3) |        # --transaction
+      ($usekey << 2) |          # --use-key
+      ($threads << 1) |         # --thread
+      $synchronize;             # --synchronize
 
   # summary of performances/instrumentation
   if ($stats eq 'csv')
@@ -2547,6 +3036,7 @@ if (defined $stats)
       ",$key_size,$col_size,$revision,$factor,",
       scalar @masks, ",$checksum,$checksize,",
       "$agg,$options,",
+      # query counters
       "$query_nb,$query_sz,$query_fr,$query_fr0,$query_data,$query_meta,",
       delay($t0, $tcks), ",",
       delay($tcks, $tsum), ",",
@@ -2562,7 +3052,7 @@ if (defined $stats)
     print
       "      revision: $revision\n",
       "       testing: $db1/$db2\n",
-      "   table count: $size\n",
+      "    table size: $size\n",
       "folding factor: $factor\n",
       "        levels: ", scalar @masks, " (cut-off from $levels)\n",
       "  query number: $query_nb\n",
@@ -2588,6 +3078,8 @@ if (defined $stats)
 }
 
 # check count for the validation
-# this check may fail if there is a hash collision?
+# this simple strategy is okay because the validation does a comparison, then
+# a synchronization and then checks that both tables are indeed identical.
+# this check may fail if there is a hash collision.
 die "unexpected number of differences (got $count, expecting $expect)"
   if defined $expect and $expect != $count;

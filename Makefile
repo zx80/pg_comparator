@@ -1,4 +1,4 @@
-# $Id: Makefile 1128 2012-08-08 07:53:42Z fabien $
+# $Id: Makefile 1162 2012-08-10 09:10:28Z fabien $
 
 #
 # PostgreSQL stuff
@@ -22,8 +22,14 @@ PGXS	:= $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 
 # derive documentation
-$(name).1: $(name); pod2man --name $(name) $< > $@
-$(name).html: $(name); pod2html --title $(name) $< > $@
+$(name).1: $(name)
+	pod2man --name $(name) $< > $@
+	touch -r $< $@
+
+$(name).html: $(name)
+	pod2html --title $(name) $< | \
+	  sed -e '/^<body style/a<h1>$(name)</h1>' > $@
+	touch -r $< $@
 
 pgsql_install: install
 pgsql_uninstall: uninstall
