@@ -1,4 +1,4 @@
-# $Id: Makefile 1162 2012-08-10 09:10:28Z fabien $
+# $Id: Makefile 1349 2012-08-19 16:56:24Z fabien $
 
 #
 # PostgreSQL stuff
@@ -67,3 +67,4 @@ local-clean:
 # development stuff is ignored by the distribution
 #
 -include dev.mk
+#include test.mk

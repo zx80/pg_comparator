@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 #
-# $Id: pg_comparator.pl 1332 2012-08-18 16:36:40Z fabien $
+# $Id: pg_comparator.pl 1375 2012-08-20 09:15:10Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -75,7 +75,7 @@ Use B<create> to use a C<CREATE ... AS SELECT ...> query,
 or B<insert> to use a C<CREATE ...; INSERT ... SELECT ...> query.
 The former will require an additional counting to get the table size,
 so in the end there are two queries anyway.
-There is a type size issue with the B<insert> strategy on mysql, the
+There is a type size issue with the B<insert> strategy on MySQL, the
 cumulated key string length must be under 64 bytes.
 
 Default is B<create> because it always works for both databases.
@@ -111,12 +111,13 @@ Note that they are dropped implicitly by default when the connection
 is closed as they are temporary, see C<-(-no)-temporary> option.
 
 Default is B<not> to clear explicitely the checksum and summary tables,
-as it is not needed. Clear is turned on with C<--threads>, if not set one
-way or the other.
+as it is not needed.
 
 =item C<--debug> or C<-d>
 
 Set debug mode. Repeat for higher debug levels. See also C<--verbose>.
+Beware that some safe gards about option settings are skipped under
+debug so as to allow testing under different conditions.
 
 Default is not to run in debug mode.
 
@@ -318,7 +319,7 @@ safer to do so.
 Use tuple checksum attribute of this name, which must be already available
 in the tables to compare. This option requires to set also either C<--use-key>
 or C<--key-checksum=...> above. The provided checksum attributes must
-not appear in the lists of key and other columns.
+not appear in the lists of key and value columns.
 See also the EXAMPLES section below for how to set a checksum trigger.
 
 Default is to build both checksums on the fly.
@@ -585,7 +586,13 @@ C<Term::ReadPassword> for C<--ask-pass> option.
 
 C<Pod::Usage> for doc self-extraction (C<--man> C<--opt> C<--help>).
 
+=item
+
+C<threads> for the experimental threaded version with option C<--threads>.
+
 =back
+
+These modules are only loaded by the script if they are actually required.
 
 =head1 ALGORITHM
 
@@ -892,6 +899,53 @@ differences is summarized by the following query:
 	   OR T2.id IS NULL      -- INSERT
 	   OR T1.data <> T2.data -- UPDATE
 
+=head1 TESTS
+
+The paper reports numerous performance tests with PostgreSQL under various
+bandwith constraints.
+
+Moreover, non regression tests are run over randomly generated tables
+when the software is upgraded:
+
+=over 4
+
+=item I<sanity> validation - about 30 seconds & 30 runs
+
+Run a comparison, synchronization & check for all databases combinaisons
+and all working asynchronous queries and threading options.
+
+=item I<fast> validation - about 8 minutes & 300 runs
+
+Run 12 tests similar to the previous one with varrying options (number of
+key columns, number of value columns, aggregate function, checksum function,
+null handling, folding factor, table locking or not...).
+
+=item I<feature> validation - about 2 minutes & 168 or 348 runs
+
+Test various features:
+I<cc> for checksum computation strategies,
+I<auto> for trigger-maintained checksums,
+I<empty> for corner cases with empty tables,
+I<engine> for InnoDB vs MyISAM MySQL backends,
+I<width> for large columns,
+I<nullkey> for possible NULL values in keys.
+
+=item I<release> validation - about 12 minutes & 816 runs
+
+This is the I<feature> with two table sizes and the I<fast> validations.
+
+=item I<hour> validation - about 1 hour & 2400 runs
+
+A combination of 8 I<fast> validations with varrying table sizes and
+difference ratio ranging from 0.1% to 99.9%.
+
+=item I<full> validation - about 6 hours, seldom run
+
+A combinatorial test involving numerous options: aggregation, checksums,
+null handling, foldings, number of key and value attributes...
+
+=back
+
 =head1 BUGS
 
 All softwares have bugs. This is a software, hence it has bugs.
@@ -900,15 +954,10 @@ Reporting bugs is good practice, so tell me if you find one.
 If you have a fix, this is even better!
 
 The implementation does not do many sanity checks.
-For instance, it does not check that the declared key is indeed a key.
 
 Although the algorithm can work with some normalized columns
 (say strings are trimmed, lowercased, Unicode normalized...),
 the implementation may not work at all.
-
-Tables with binary keys or with NULL in keys may not work.
-Synchronizing tables with large object attributes may fail and result in
-strange error messages.
 
 The script is really tested with integer and text types, issues may arise
 with other types.
@@ -935,12 +984,20 @@ My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
+Synchronization now handles possible NULLs in keys.
+Warn if key is nullable or not an integer under C<--use-key>.
+Improved documentation, in particular non regression tests are described.
+The I<release> and I<hour> validations were run successfully
+on PostgreSQL 9.1.4 and MySQL 5.5.24.
+
+=item B<version 2.1.0> 2012-08-18 (r1333)
+
 Add C<--tuple-checksum> and C<--key-checksum> options so as to use existing
 possibly trigger-maintained checksums in the target tables instead of
 computing them on the fly.
 Add C<--checksum-computation> option to control how the checksum table is
 built, either C<CREATE ... AS ...> or C<CREATE ...; INSERT ...>.
-For mysql, rely directly on the count returned by C<CREATE ... AS> if available.
+For MySQL, rely directly on the count returned by C<CREATE ... AS> if available.
 Add C<--lock> option for locking tables, which is enabled when synchronizing.
 Improve asynchronous query handling, especially when creating checksum tables
 and getting initial table counts, and in some other cases.
@@ -1142,7 +1199,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1332 $';
+my $revision = '$Revision: 1375 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1393,7 +1450,6 @@ sub sth_param_exec($$$$@)
 {
   my ($doit, $what, $sth, $keys, @cols) = @_;
   my $index = 1;
-  verb 3, "$what(@cols,@{$keys})";
   # ??? $sth->execute(@cols, @$keys);
   for my $val (@cols, @{$keys}) {
     $sth->bind_param($index++, $val) if $doit;
@@ -1464,6 +1520,24 @@ sub build_conn($$$$$$$$$)
 }
 
 ###################################################################### DB UTILS
+
+# build cols=? sql-expression
+sub is_equal($$$$)
+{
+  my ($dbh, $dhpbt, $db, $cols) = @_;
+  my $expr = '';
+  for my $att (@$cols) {
+    $expr .= ' AND ' if $expr;
+    $expr .= $att;
+    if (col_is_not_null($dbh, $dhpbt, $att)) {
+      $expr .= '=?';
+    }
+    else {
+      $expr .= ($db eq 'pgsql'? ' IS NOT DISTINCT FROM ?': '<=>?');
+    }
+  }
+  return $expr;
+}
 
 # unquote an identifier
 sub db_unquote($$)
@@ -1562,6 +1636,7 @@ sub get_column_info($$$)
     $query_meta++;
     # ??? for some obscure reason, this fails is postgresql under -T
     async_wait($dbh, $db, 'column info') if $async;
+    verb 6, "column_info: $db $base $table $col" if $debug;
     my $sth =
       $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
     die "column_info not implemented by driver" unless defined $sth;
@@ -1587,16 +1662,6 @@ sub col_is_not_null($$$)
   }
   verb 6, "not null for $dhpbt:$col is $notnull" if $debug;
   return $notnull;
-}
-
-# warn if attributes are nullable
-sub check_not_null($$$)
-{
-  my ($dbh, $dhpbt, $key) = @_;
-  for my $att (@$key) {
-    warn "$dhpbt $att key attribute is nullable..."
-      unless col_is_not_null($dbh, $dhpbt, $att);
-  }
 }
 
 # return type of column
@@ -1841,9 +1906,11 @@ sub key_pk_get($$$$$)
 
 # build initial checksum table, dbh must be serialized
 # NOTE: if 'insert' the number of rows is returned or underway
+# keys: list of key attributes
+# pkeys: null-protected keys
 sub build_cs_table($$$$$$$$)
 {
-  my ($dbh, $dhpbt, $db, $table, $skeys, $keys, $cols, $name) = @_;
+  my ($dbh, $dhpbt, $db, $table, $keys, $pkeys, $cols, $name) = @_;
   verb 2, "building checksum table ${name}0";
   sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
 
@@ -1854,11 +1921,11 @@ sub build_cs_table($$$$$$$$)
     # ??? hmmm... should rather use quote_nullable()? then how to unquote?
     # always use 4 bytes for hash(key), because mask is 4 bytes anyway.
     # however under usekey the key type is kept as such
-    ($usekey? "@$skeys": ckatts($db, $checksum, 4, $keys)) . " AS kcs, " .
+    ($usekey? "@$keys": ckatts($db, $checksum, 4, $pkeys)) . " AS kcs, " .
     # then TUPLE CHECKSUM
     # this could be skipped if cols is empty...
     # it would be somehow redundant with the previous one if same size
-    ckatts($db, $checksum, $checksize, [@$keys, @$cols]) . " AS tcs" .
+    ckatts($db, $checksum, $checksize, [@$pkeys, @$cols]) . " AS tcs" .
     # keep KEY, only if needed
     ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'AS')) .
     " FROM $table" . ($where? " WHERE $where": '');
@@ -1881,7 +1948,7 @@ sub build_cs_table($$$$$$$$)
 	   "CREATE ${temp}TABLE ${name}0 (" .
 	   # KEY CHECKSUM NN?
 	   'kcs ' .
-	($usekey? col_type($dbh, $dhpbt, $db, "@$keys"): checksum_type($db, 4)).
+       ($usekey? col_type($dbh, $dhpbt, $db, "@$pkeys"): checksum_type($db, 4)).
 	   # TUPLE CHECKSUM NN?
 	   ' NOT NULL, tcs ' . checksum_type($db, $checksize) . ' NOT NULL' .
 	   # KEY...
@@ -1931,15 +1998,14 @@ sub get_count($$$$$)
   return $count;
 }
 
-# $count = compute_checksum($dbh,$dhpbt,$table,$skeys,$keys,$cols,$name,$size)
+# $count = compute_checksum($dbh,$dhpbt,$table,$key,$pkeys,$cols,$name,$size)
 # globals: $temp $verb $cleanup $null $checksum $checksize...
 sub compute_checksum($$$$$$$$$)
 {
-  my ($dbh, $dhpbt, $db, $table, $skeys, $keys, $cols, $name, $size) = @_;
+  my ($dbh, $dhpbt, $db, $table, $keys, $pkeys, $cols, $name, $size) = @_;
   dbh_materialize($dbh, $db);
-  check_not_null($dbh, $dhpbt, $keys);
-  my $count =
-    build_cs_table($dbh, $dhpbt, $db, $table, $skeys, $keys, $cols, $name);
+  my $count = build_cs_table(
+    $dbh, $dhpbt, $db, $table, $keys, $pkeys, $cols, $name);
   if (not $size) { # we need to get the count
     my $sth = start_count($dbh, $dhpbt, $db, "${name}0");
     $count = get_count($dbh, $dhpbt, $db, $sth, $count);
@@ -2539,11 +2605,9 @@ if (not defined $c1)
 $k2 = $k1 unless defined $k2;
 $c2 = $c1 unless defined $c2;
 
-# more sanity checks
+# some sanity checks
 die "key number of attributes does not match" unless @$k1 == @$k2;
 die "column number of attributes does not match" unless @$c1 == @$c2;
-die "use-key option requires a simple integer key, got (@$k1)"
-  if $usekey and @$k1 != 1;
 
 # whether to use nullability
 my ($pk1, $pk2, $pc1, $pc2);
@@ -2552,13 +2616,32 @@ my $fmt2 = null_template($db2, $null, $checksum, $checksize);
 my $dhpbt1 = "$db1:$h1:$p1:$b1:$t1";
 my $dhpbt2 = "$db2:$h2:$p2:$b2:$t2";
 
-# needed by subs_null
+# needed by next test and subs_null
 dbh_materialize($dbh1, $db1);
 dbh_materialize($dbh2, $db2);
+
+# use-key checks
+if ($usekey) {
+  # key 1
+  die "use-key option requires a scalar key, got (@$k1)" if @$k1 != 1;
+  my $type1 = col_type($dbh1, $dhpbt1, $db1, $$k1[0]);
+  warn "use-key option requires an integer key 1, got $type1"
+    unless $type1 =~ /int/i;
+  warn "use-key option requires a NOT NULL key 1"
+    unless col_is_not_null($dbh1, $dhpbt1, $$k1[0]);
+  # key 2
+  # size is already checked as same as k1
+  my $type2 = col_type($dbh2, $dhpbt2, $db2, $$k2[0]);
+  warn "use-key option requires an integer key 2, got $type2"
+    unless $type2 =~ /int/i;
+  warn "use-key option requires a NOT NULL key 2"
+    unless col_is_not_null($dbh2, $dhpbt2, $$k2[0]);
+}
 
 if ($usenull)
 {
   # hmmm... I should ckeck that it is coherent
+  # null-proctected keys, possibly hash or text
   $pk1 = subs_null($fmt1, $dbh1, $dhpbt1, $k1);
   $pk2 = subs_null($fmt2, $dbh2, $dhpbt2, $k2);
   $pc1 = subs_null($fmt1, $dbh1, $dhpbt1, $c1);
@@ -2572,9 +2655,6 @@ else
   $pc2 = [subs($fmt2, @$c2)];
 }
 
-my $tk1 = subs_null(null_template($db1, 'text', 0, 0), $dbh1, $dhpbt1, $k1);
-my $tk2 = subs_null(null_template($db2, 'text', 0, 0), $dbh2, $dhpbt2, $k2);
-
 dbh_serialize($dbh1, $db1);
 dbh_serialize($dbh2, $db2);
 
@@ -2583,8 +2663,6 @@ my ($count1, $count2);
 if ($tup_cs) # no checksum table to compute
 {
   verb 2, "using provided checksum '$tup_cs'...";
-  check_not_null($dbh1, $dhpbt1, $k1);
-  check_not_null($dbh2, $dhpbt2, $k2);
   if (not $size) # but count is needed
   {
     verb 2, "computing sizes...";
@@ -2605,12 +2683,12 @@ if ($tup_cs) # no checksum table to compute
 else # must compute checksum table
 {
   if ($threads) {
-    ($thr1) = threads->new(\&compute_checksum, $dbh1, $dhpbt1, $db1,
-			   $t1, $usekey? $k1: $tk1, $pk1, $pc1, $name1, $size)
+    ($thr1) = threads->new(\&compute_checksum, $dbh1, $dhpbt1, $db1, $t1,
+			   $k1, $pk1, $pc1, $name1, $size)
       or die "cannot create thread 1-1";
 
-    ($thr2) = threads->new(\&compute_checksum, $dbh2, $dhpbt2, $db2,
-			   $t2, $usekey? $k2: $tk2, $pk2, $pc2, $name2, $size)
+    ($thr2) = threads->new(\&compute_checksum, $dbh2, $dhpbt2, $db2, $t2,
+			   $k2, $pk2, $pc2, $name2, $size)
       or die "cannot create thread 2-1";
 
     verb 1, "waiting for connexions and possibly counts...";
@@ -2618,13 +2696,11 @@ else # must compute checksum table
     ($count2) = $thr2->join();
   }
   else { # no thread
-    check_not_null($dbh1, $dhpbt1, $k1);
-    check_not_null($dbh2, $dhpbt2, $k2);
     # CREATE TABLE & SELECT
     ($count1) = build_cs_table($dbh1, $dhpbt1, $db1, $t1,
-			       $usekey? $k1: $tk1, $pk1, $pc1, $name1);
+			       $k1, $pk1, $pc1, $name1);
     ($count2) = build_cs_table($dbh2, $dhpbt2, $db2, $t2,
-			       $usekey? $k2: $tk2, $pk2, $pc2, $name2);
+			       $k2, $pk2, $pc2, $name2);
     # SELECT COUNT
     if (not $size) {
       # decomposition is needed to take advantage of asynchronous queries
@@ -2816,8 +2892,8 @@ if ($synchronize and
   $dbh2->begin_work if $do_it and not $do_trans;
 
   # build query helpers
-  my $where_k1 = (join '=? AND ', @$k1) . '=?';
-  my $where_k2 = (join '=? AND ', @$k2) . '=?';
+  my $where_k1 = is_equal($dbh1, $dhpbt1, $db1, $k1);
+  my $where_k2 = is_equal($dbh2, $dhpbt2, $db2, $k2);
   my $set_c2 = (join '=?, ', @$c2) . '=?';
 
   # delete rows
@@ -2967,6 +3043,7 @@ $tend = [gettimeofday];
 # some stats are collected out of time measures
 if ($stats)
 {
+  my $tk1 = subs_null(null_template($db1, 'text', 0, 0), $dbh1, $dhpbt1, $k1);
   $key_size = col_size($dbh1, $db1, $t1, $tk1);
   $col_size = col_size($dbh1, $db1, $t1,
 		       [subs(null_template($db1, 'text', 0, 0), @$c1)]);

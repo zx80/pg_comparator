@@ -1,12 +1,15 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 1311 2012-08-17 09:45:41Z fabien $
+# $Id: test_pg_comparator.sh 1369 2012-08-20 08:07:59Z fabien $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost -- \
 #    --synchronize --stats --do-it
 
 PATH=$PATH:.
+
+# detect pipeline errors
+set -o pipefail
 
 # default values
 rows=1000 name=foo width=5 nkey=0 ncol=2 base=$USER
@@ -16,7 +19,7 @@ seed=$(date +%s)
 create= modify= cmp=
 
 # misc
-auth= keep= eng= debug= trigger= empty1= empty2=
+auth= keep= eng= debug= trigger= empty1= empty2= nullkey=
 
 # default diffs
 upt=2 ins=2 del=2 nul=2 rev=1 notnull= total=
@@ -37,8 +40,9 @@ while [[ "$1" && "$1" != '--' ]] ; do
     --rows|-r) rows=$1 ; shift ;;
     --key|-k) nkey=$1 ; shift ;;
     --col|-c) ncol=$1 ; shift ;;
-    --width|-w) width=$1 ; shift ;; # about 17 chars per w
-    --engine|-e) eng=$1 ; shift ;; # for mysql
+    --width|-w) width=$1 ; shift ;; # about 17 (up to 18) chars per w
+    --engine|-e) eng=$1 ; shift ;; # for mysql only
+    --null-key|-nk) nullkey=' --null-key' ;;
     --tuple-trigger|--tt|-T) trigger+=' --tc=tup_cs --no-null' ;;
     --key-trigger|--kt) trigger+=' --kc=key_cs --no-null' ;;
     --empty-1|--e1) empty1=1 ;;
@@ -166,11 +170,13 @@ function create_table()
   echo "DROP TABLE IF EXISTS ${name};"
 
   rand_table.pl --$db --table ${name} --seed $seed --rows $rows \
-	--keys=$keys --columns=$cols --width $width $engine $trigger
+	--keys=$keys --columns=$cols --width $width $engine $trigger $nullkey
 
   echo "COMMIT;"
 
   [ $db = 'pgsql' ] && echo "VACUUM FULL ANALYZE ${name};"
+
+  return 0;
 }
 
 # generate specified table modifications
@@ -204,7 +210,12 @@ function change_table()
     # id about proportional to i-th fraction
     local id=$(($rows*$i/$div))
     #echo "id=$id" >&2
-    if [[ $upt -ne 0 ]] ; then
+    # special case for --null-key
+    if [ $i -eq 1 -a "$nullkey" ] ; then
+      let upt--
+      [ "$debug" ] && { echo "# update id IS NULL" >&2 ; }
+      echo "UPDATE $name SET b0='id is null' WHERE id IS NULL;"
+    elif [[ $upt -ne 0 ]] ; then
       let upt-- c=++$c%$ncol
       [ "$debug" ] && { echo "# update id=$id" >&2 ; }
       echo "UPDATE $name SET b$c='bouh' WHERE id=$id;"
@@ -241,6 +252,8 @@ function change_table()
   echo "COMMIT;"
 
   [ $db = 'pgsql' ] && echo "VACUUM FULL ANALYZE ${name};"
+
+  return 0
 }
 
 # pgsql://calvin:hobbes@[host]
@@ -292,6 +305,11 @@ sql2=$(parse_conn $auth2 $base)
   create_table $db2 ${name}2 $seed $(($rows2+$del)) \
     "$key2" "$col2" $width $eng | \
       eval $sql2
+  status=$?
+  if [ $status -ne 0 ] ; then
+    echo "table 2 generation failed: $status" >&2
+    exit 1
+  fi
 }
 
 [ "$modify" -a ! "$empty1$empty2" ] &&
@@ -299,11 +317,23 @@ sql2=$(parse_conn $auth2 $base)
   # modify the second table
   change_table $db2 ${name}2 $ncol $rows "$key2" "$col2" \
       $upt $ins 0 $nul $rev | eval $sql2
+  status=$?
+  if [ $status -ne 0 ] ; then
+    echo "table 2 changes failed: $status" >&2
+    exit 2
+  fi
 }
 
 echo "EXPECTING $msg"
 
-[ "$wait" ] && wait $wait
+if [ "$wait" ] ; then
+  wait $wait
+  status=$?
+  if [ $status -ne 0 ] ; then
+    echo "table 1 generation failed: $status" >&2
+    exit 3
+  fi
+fi
 
 status=0
 if [ "$cmp" ] ; then

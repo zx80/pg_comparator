@@ -1,14 +1,9 @@
 #
-# $Id: test.mk 1333 2012-08-18 17:15:06Z fabien $
+# $Id: test.mk 1374 2012-08-20 09:14:23Z fabien $
 #
 # run pg_comparator validation checks
 #
 # having that as a makefile is not really justified.
-# a shell script would have been better, as there is no
-# point in parallelizing it.
-
-# make AUTH=pgsql://login:password@localhost \
-#      PGCOPTS='--stats-name=test --stats=csv' fast_pg
 
 SHELL	= /bin/bash
 
@@ -33,6 +28,7 @@ CS	= 8
 # other options
 #ENGINE	= INNODB ## MUCH TOO SLOW!
 ENGINE	= MYISAM
+# for external use
 PGCOPTS	=
 # for internal use by this makefile
 pgcopts	=
@@ -86,11 +82,14 @@ run: pg_comparator
 	$(MAKE) create
 	$(PG_PRE)
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
-	    --null=$(NULL) -e $(TOTAL) $(pgcopts) $(PGCOPTS) $(CONN1) $(CONN2)
+	    --null=$(NULL) -e $(TOTAL) --no-report $(pgcopts) $(PGCOPTS) \
+		$(CONN1) $(CONN2)
 	time ./pg_comparator -S -D -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
-	    --null=$(NULL) -e $(TOTAL) $(pgcopts) $(PGCOPTS) $(CONN1) $(CONN2)
+	    --null=$(NULL) -e $(TOTAL) --no-report $(pgcopts) $(PGCOPTS) \
+		$(CONN1) $(CONN2)
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
-	    --null=$(NULL) -e 0 $(pgcopts) $(PGCOPTS) $(CONN1) $(CONN2)
+	    --null=$(NULL) -e 0 --no-report $(pgcopts) $(PGCOPTS) \
+		$(CONN1) $(CONN2)
 	$(PG_POST)
 
 ########################################################################## FULL
@@ -184,7 +183,7 @@ fast_mix: fast
 
 ######################################################################## SANITY
 #
-# very quick validation: 3*(2+4+2*2) = 30 runs
+# very quick validation: 3*(2+4+4) = 30 runs
 #
 .PHONY: sanity
 # default KEYS=0 COLS=1
@@ -253,7 +252,7 @@ validate: check_validation_environment
 # 3*10 runs, about 30 seconds.
 .PHONY: validate_sanity
 validate_sanity:
-	$(MAKE) VALIDATE=sanity pgcopts+=' --no-report' validate
+	$(MAKE) VALIDATE=sanity validate
 
 # fast validation is 300 runs, on Ankh:
 # - TOTAL=9 ROWS=10 ~ 4 minutes
@@ -271,7 +270,7 @@ validate_sanity:
 # total: 72 + 144 + 84 = 300
 .PHONY: validate_fast
 validate_fast:
-	$(MAKE) VALIDATE=fast pgcopts+=' --no-report' validate
+	$(MAKE) VALIDATE=fast validate
 
 # 8*300 = 2400 tests, about 60 minutes on Ankh
 # default validate_fast is TOTAL=8 ROWS=100 so it is not included
@@ -298,34 +297,36 @@ validate_full:
 ############################################################ FEATURE VALIDATION
 
 # tests some options without setting rows
-
+# 60+18+90 = 168
+# 24+96+60 = 180
 .PHONY: validate_feature
 validate_feature:
+	@echo "# $@ ROWS=$(ROWS) start"
 	$(MAKE) validate_cc
 	$(MAKE) validate_auto   # pgsql only
 	$(MAKE) validate_empty
 	[ $(ROWS) = 10 ] && $(MAKE) validate_engine || exit 0 # mysql only
 	[ $(ROWS) = 10 ] && $(MAKE) validate_width || exit 0
-
-# what if some tables are empty?
-.PHONY: validate_empty
-validate_empty:
-	$(MAKE) crtopts+=' --e1 --e2' TOTAL=0 validate_sanity
-	$(MAKE) crtopts+=' --e1' TOTAL=$(ROWS) validate_sanity
-	$(MAKE) crtopts+=' --e2' TOTAL=$(ROWS) validate_sanity
+	[ $(ROWS) = 10 ] && $(MAKE) validate_nullkey || exit 0
+	@echo "# $@ done"
 
 # validate how to create the initial checksum table
+# 3*10*2 = 60 runs
 .PHONY: validate_cc
 validate_cc:
-	$(MAKE) pgcopts+=' --cc=create' validate_sanity
-	$(MAKE) pgcopts+=' --cc=insert' validate_sanity
+	@echo "# $@ start"
+	$(MAKE) pgcopts+=' --cc=create' validate
+	$(MAKE) pgcopts+=' --cc=insert' validate
+	@echo "# $@ done"
 
 # validate pre-computed checksums
 # the settings must be consistent between pg_comparator & rand_table
 # the test is only with PostgreSQL for which triggers are easy for me.
+# 3*2*3 = 18 runs
 .PHONY: validate_auto
 validate_auto: VALIDATE=sanity
 validate_auto:
+	@echo "# $@ start"
 	$(MAKE) KEYS=0 COLS=0 \
 	  pgcopts+=' --tcs=id --use-key' \
 	  validate_pg
@@ -337,35 +338,61 @@ validate_auto:
 	  crtopts+=' --tt --kt --nn' \
 	  pgcopts+=' --tcs=tup_cs --kcs=key_cs' \
 	  validate_pg
+	@echo "# $@ done"
+
+# what if some tables are empty?
+# 3*10*3 = 90 runs
+.PHONY: validate_empty
+validate_empty:
+	@echo "# $@ start"
+	$(MAKE) crtopts+=' --e1 --e2' TOTAL=0       validate
+	$(MAKE) crtopts+=' --e1'      TOTAL=$(ROWS) validate
+	$(MAKE) crtopts+=' --e2'      TOTAL=$(ROWS) validate
+	@echo "# $@ done"
 
 # some options may not work as expected depending on the engine...
 # very small because INNODB table creation is very slow
 # despite the surrounding transaction
+# 3*4*2 = 24 runs
 .PHONY: validate_engine
 validate_engine:
+	@echo "# $@ start"
 	$(MAKE) ENGINE='INNODB' KEYS=2 COLS=2 ROWS=10 validate_my
 	$(MAKE) ENGINE='MYISAM' KEYS=2 COLS=2 ROWS=10 validate_my
+	@echo "# $@ done"
 
 # try large columns
+#$(MAKE) KEYS=1 COLS=1 WIDTH=10000 ROWS=10 validate_pg # broken?
+# 3*10*3 + 3*2*1 = 96 runs
 .PHONY: validate_width
 validate_width:
-	$(MAKE) WIDTH=100 ROWS=10 validate_sanity
-	#$(MAKE) WIDTH=1000 ROWS=10 validate_sanity # mix is broken
-	$(MAKE) COLS=3 WIDTH=1000 ROWS=10 validate_pg
-	$(MAKE) COLS=3 WIDTH=1000 ROWS=10 validate_my
-	$(MAKE) WIDTH=10000 ROWS=10 validate_pg
-	$(MAKE) WIDTH=10000 ROWS=10 validate_my
+	@echo "# $@ start"
+	$(MAKE)        WIDTH=100    ROWS=10 validate
+	$(MAKE) COLS=3 WIDTH=1000   ROWS=10 validate
+	$(MAKE) COLS=1 WIDTH=3500   ROWS=10 validate # max 65KB for MySQL TEXT
+	$(MAKE) COLS=2 WIDTH=100000 ROWS=10 validate_pg
+	@echo "# $@ done"
+
+# validate with a nullable key
+# 3*10*2 = 60 runs
+.PHONY: validate_nullkey
+validate_nullkey:
+	@echo "# $@ start"
+	$(MAKE) crtopts+=' --null-key' KEYS=0 COLS=1 ROWS=10 validate
+	$(MAKE) crtopts+=' --null-key' KEYS=1 COLS=2 ROWS=10 validate
+	@echo "# $@ done"
 
 ####################################################################### RELEASE
 
 # about 10 minutes
 # ROWS=10: high change rate (80%)
 # ROWS=100: low change rate (8%)
+# 348+168+300 = 816
 .PHONY: validate_release
 validate_release:
-	$(MAKE) ROWS=10  validate_feature && \
+	$(MAKE) ROWS=10   validate_feature && \
 	$(MAKE) ROWS=1000 validate_feature && \
-	$(MAKE) validate_fast && \
+	$(MAKE)           validate_fast && \
 	echo "# $@ done in $$SECONDS seconds"
 
 ################################################################### PERFORMANCE

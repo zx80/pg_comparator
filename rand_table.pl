@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 #
-# $Id: rand_table.pl 1298 2012-08-17 07:14:22Z fabien $
+# $Id: rand_table.pl 1367 2012-08-20 07:38:04Z fabien $
 #
 # generates a sample table for pg_comparator tests
 #
@@ -9,17 +9,18 @@ use strict;
 use warnings;
 use Getopt::Long qw(:config no_ignore_case);
 
-my $table = 'foo';
-my $rows = 1000;
-my @keys = ();
-my @columns = ();
-my $width = 1;
-my $key = 0;
-my $null = 1;
-my $create = 1;
-my $db = 'pgsql';
-my $transaction = 0;
-my ($engine, $key_cs, $tup_cs);
+my $table = 'foo';   # default table name
+my $rows = 1000;     # number of rows
+my @keys = ();       # list of supplemental key attributes
+my @columns = ();    # list of value attributes
+my $width = 1;       # add 18 chars per width
+my $key = 0;         # starting id
+my $null = 1;        # declare elements as nullable
+my $nullkey = 0;     # allow null keys
+my $create = 1;      # whether to create the table
+my $db = 'pgsql';    # target database, 'pgsql' or 'mysql'
+my $transaction = 0; # whether to wrap in a transaction
+my ($engine, $key_cs, $tup_cs); # mysql engine, key/tuple checksum attributes
 
 GetOptions(
   "table|t=s" => \$table,
@@ -30,6 +31,7 @@ GetOptions(
   "columns|c:s" => \@columns,
   "width|w=i" => \$width,
   "null|n!" => \$null,
+  "null-key|nk!" => \$nullkey,
   "start-key|start|sk|K=i" => \$key,
   "transaction|T!" => \$transaction,
   # target database
@@ -59,7 +61,7 @@ die "--*-checksum options work only for pgsql"
 die "engine option only valid under mysql"
   if defined $engine and $db ne 'mysql';
 
-# generate an auto-maintained checksum on some cols
+# generate an auto-maintained checksum on some not null cols
 sub column_checksum($$$@)
 {
   my ($name, $att, $size, @cols) = @_;
@@ -85,10 +87,16 @@ if ($create)
 {
   print "DROP TABLE IF EXISTS $table;\n";
   print "CREATE TABLE $table(\n  id INTEGER";
-  for my $c (@keys, @columns) {
-    print ",\n  $c ",
-      ($db eq 'pgsql'? 'TEXT': 'VARCHAR(64)'),
-      ($null? '': ' NOT NULL');
+  # key columns
+  for my $k (@keys) {
+    # note: mysql does not like BLOB/CLOB types in keys...
+    # NOT NULL: implied by PRIMARY KEY if used
+    print ",\n  $k ", ($db eq 'pgsql'? 'TEXT': 'VARCHAR(64)');
+  }
+  # other columns
+  for my $c (@columns) {
+    # note: mysql: max len for text is 65535
+    print ",\n  $c TEXT", ($null? '': ' NOT NULL');
   }
 
   # checksums attributes
@@ -97,24 +105,16 @@ if ($create)
   print ",\n  $tup_cs " . ($db eq 'pgsql'? 'INT8': 'BIGINT') . ' NOT NULL'
     if $tup_cs;
 
-  # primary key
+  # PRIMARY KEY implies NOT NULL, but UNIQUE does not
   print
-      ",\n  PRIMARY KEY (", join(',','id',@keys), ")\n)",
-      $engine? "ENGINE $engine": '', ";\n";
+      ",\n  ", $nullkey? 'UNIQUE': 'PRIMARY KEY', " (",
+      join(',', 'id', @keys), ")\n)", $engine? "ENGINE $engine": '', ";\n";
 
   # checksum triggers, should be a single trigger.
   column_checksum('key', $key_cs, 4, @keys) if $key_cs;
   column_checksum('tup', $tup_cs, 8, (@keys, @columns)) if $tup_cs;
 }
-
-# start transaction
-print "BEGIN;\n" if $transaction;
-
-# fill table
-print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n"
-    if $db eq 'pgsql';
-
-# generate a pseudo random string
+  # generate a pseudo random string
 sub ran($)
 {
   my ($n) = @_;
@@ -125,26 +125,47 @@ sub ran($)
   return $ran;
 }
 
-my $i = 0;
-while ($i++<$rows) {
-  if ($db eq 'pgsql') {
-    print $key+$i;
-    for my $c (@keys, @columns) {
-      print "\t", ran($width);
+if ($rows)
+{
+  # start transaction
+  print "BEGIN;\n" if $transaction;
+
+  # fill table
+  print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n"
+      if $db eq 'pgsql';
+  print "INSERT INTO $table VALUES\n" if $db eq 'mysql';
+
+  # generate speudo random table contents
+  my $i = 0;
+  while ($i<$rows)
+  {
+    $i++;
+    if ($db eq 'pgsql') {
+      print (($nullkey and $i==1)? '\N': ($key+$i));
+      for my $c (@keys, @columns) {
+	print "\t", ran($width);
+      }
+      print "\n";
     }
-    print "\n";
-  }
-  elsif ($db eq 'mysql') {
-    print "INSERT INTO $table VALUES(", $key+$i;
-    for my $c (@keys, @columns) {
-      print ",'", ran($width), "'";
+    elsif ($db eq 'mysql') {
+      print '(';
+      print (($nullkey and $i==1)? 'NULL': ($key+$i));
+      for my $c (@keys, @columns) {
+	print ",'", ran($width), "'";
+      }
+      print ")", ($i!=$rows? ',': ''), "\n";
     }
-    print ");\n";
+    else {
+      die "unexpected db=$db";
+    }
   }
+
+  print "\\.\n" if $db eq 'pgsql';
+  print ";\n" if $db eq 'mysql';
+
+  # end transaction
+  print "COMMIT;\n" if $transaction;
+
+  # end fill table
+  print "ANALYZE $table;\n" if $db eq 'pgsql';
 }
-
-# end transaction
-print "COMMIT;\n" if $transaction;
-
-# end fill table
-print "\\.\nANALYZE $table;\n" if $db eq 'pgsql';
