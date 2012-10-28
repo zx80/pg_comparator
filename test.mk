@@ -1,9 +1,9 @@
 #
-# $Id: test.mk 1374 2012-08-20 09:14:23Z fabien $
+# $Id: test.mk 1397 2012-10-28 09:52:43Z fabien $
 #
 # run pg_comparator validation checks
 #
-# having that as a makefile is not really justified.
+# having that as a makefile is moderately justified.
 
 SHELL	= /bin/bash
 
@@ -33,6 +33,10 @@ PGCOPTS	=
 # for internal use by this makefile
 pgcopts	=
 
+# table names: must be foo1 & foo2 anyway, but may add quoting for tests
+tab1	= foo1
+tab2	= foo2
+
 # generate column names
 coln	:= $(shell n=$(COLS); while let n--; do echo $$n; done)
 col1	:= $(shell echo $(addprefix a,$(coln))|tr ' ' ',')
@@ -47,17 +51,18 @@ AUTH1	= $(AUTH)
 AUTH2	= $(AUTH)
 
 # connections
-CONN1	= $(AUTH1)/$(DB)/foo1?$(key1):$(col1)
-CONN2	= $(AUTH2)/$(DB)/foo2?$(key2):$(col2)
+CONN1	= $(AUTH1)/$(DB)/$(tab1)?$(key1):$(col1)
+CONN2	= $(AUTH2)/$(DB)/$(tab2)?$(key2):$(col2)
 
 # pre/post comparison settings
 PG_PRE	= :
 PG_POST	= :
 
-noxor	=
+# can be overriden for mixed tests
+xor	= xor
 
 #
-# generate a test case for pg_comparator
+# test case generation for pg_comparator
 #
 # Create, Modify, Keep
 RUNOPS	= -C -M -K
@@ -66,30 +71,27 @@ RUNOPS	= -C -M -K
 # -s seed
 crtopts =
 CRTOPTS	=
-.PHONY: create
-create:
+
+#
+# test generation, then comparison & synchronization & check
+#
+# make AUTH=calvin:hobbes@home DB=calvin COLS=0 ROWS=1000 run
+.PHONY: run
+run: pg_comparator
 	./test_pg_comparator.sh \
 	  -1 $(AUTH1) -2 $(AUTH2) -b $(DB) \
 	  -k $(KEYS) -c $(COLS) -r $(ROWS) -w $(WIDTH) \
 	  -t $(TOTAL) -e $(ENGINE) $(RUNOPS) $(crtopts) $(CRTOPTS)
-
-#
-# test comparison & synchronization & check
-#
-# make AUTH=calvin:hobbes@home DB=calvin COLS=0 ROWS=1000 test_run
-.PHONY: run
-run: pg_comparator
-	$(MAKE) create
 	$(PG_PRE)
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
 	    --null=$(NULL) -e $(TOTAL) --no-report $(pgcopts) $(PGCOPTS) \
-		$(CONN1) $(CONN2)
+		'$(CONN1)' '$(CONN2)'
 	time ./pg_comparator -S -D -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
 	    --null=$(NULL) -e $(TOTAL) --no-report $(pgcopts) $(PGCOPTS) \
-		$(CONN1) $(CONN2)
+		'$(CONN1)' '$(CONN2)'
 	time ./pg_comparator -f $(FOLD) --cf=$(CF) -a $(AGG) --cs=$(CS) \
 	    --null=$(NULL) -e 0 --no-report $(pgcopts) $(PGCOPTS) \
-		$(CONN1) $(CONN2)
+		'$(CONN1)' '$(CONN2)'
 	$(PG_POST)
 
 ########################################################################## FULL
@@ -137,7 +139,7 @@ full_null:
 .PHONY: full_agg
 full_agg:
 	$(MAKE) AGG=sum full_null
-	$(noxor) $(MAKE) AGG=xor full_null
+	[ $(xor) = 'xor' ] && $(MAKE) AGG=xor full_null || exit 0
 
 # full table sizes
 .PHONY: full_sizes
@@ -162,23 +164,23 @@ full_mix: full_sizes
 fast:
 	$(MAKE) CF=md5 CS=8 AGG=sum NULL=text FOLD=1 KEYS=0 COLS=0 run
 	$(MAKE) CF=ck  CS=8 AGG=sum NULL=text FOLD=2 KEYS=0 COLS=1 pgcopts+=' -u' run
-	$(noxor) $(MAKE) CF=md5 CS=8 AGG=xor NULL=hash FOLD=1 KEYS=0 COLS=1 run
+	$(MAKE) CF=md5 CS=8 AGG=$(xor) NULL=hash FOLD=1 KEYS=0 COLS=1 run
 	$(MAKE) CF=md5 CS=8 AGG=sum NULL=text FOLD=1 KEYS=1 COLS=2 pgcopts+=' --max-levels=3' run
 	$(MAKE) CF=md5 CS=4 AGG=sum NULL=hash FOLD=3 KEYS=0 COLS=2 pgcopts+=' --lock' run
 	$(MAKE) CF=ck  CS=8 AGG=sum NULL=text FOLD=2 KEYS=0 COLS=1 pgcopts+=' --cc=insert' run
 	$(MAKE) CF=ck  CS=4 AGG=sum NULL=hash FOLD=4 KEYS=1 COLS=0 pgcopts+=' --no-lock' run
 	$(MAKE) CF=ck  CS=8 AGG=sum NULL=hash FOLD=4 KEYS=1 COLS=3 pgcopts+=' --size=$(ROWS)' run
-	$(noxor) $(MAKE) CF=md5 CS=8 AGG=xor NULL=text FOLD=5 KEYS=1 COLS=1 pgcopts+=' --cc=insert' run
-	$(noxor) $(MAKE) CF=ck  CS=4 AGG=xor NULL=hash FOLD=7 KEYS=2 COLS=3 run
-	$(noxor) $(MAKE) CF=ck  CS=8 AGG=xor NULL=text FOLD=6 KEYS=1 COLS=2 run
-	$(noxor) $(MAKE) CF=ck  CS=8 AGG=xor NULL=hash FOLD=8 KEYS=2 COLS=3 run
+	$(MAKE) CF=md5 CS=8 AGG=$(xor) NULL=text FOLD=5 KEYS=1 COLS=1 pgcopts+=' --cc=insert' run
+	$(MAKE) CF=ck  CS=4 AGG=$(xor) NULL=hash FOLD=7 KEYS=2 COLS=3 run
+	$(MAKE) CF=ck  CS=8 AGG=$(xor) NULL=text FOLD=6 KEYS=1 COLS=2 run
+	$(MAKE) CF=ck  CS=8 AGG=$(xor) NULL=hash FOLD=8 KEYS=2 COLS=3 run
 
 # this is scripted rather than relying on dependencies
 # so that the error messages are clearer
 .PHONY: fast_pg fast_my fast_mix
 fast_pg: fast
 fast_my: fast
-fast_mix: noxor=:
+fast_mix: xor=sum
 fast_mix: fast
 
 ######################################################################## SANITY
@@ -219,40 +221,46 @@ check_validation_environment: pg_comparator
 # threads never worked with pgsql (try with -T --debug)
 .PHONY: validate_pg
 validate_pg: check_validation_environment
-	@echo "# VALIDATING PGSQL ..."
+	@echo "# $@ $(VALIDATE) start"
 	$(MAKE) AUTH1=$(auth1) AUTH2=$(auth1) pgcopts+=' -X -N' $(VALIDATE)_pg
 	$(MAKE) AUTH1=$(auth1) AUTH2=$(auth1) pgcopts+=' -A -N' $(VALIDATE)_pg
+	@echo "# $@ $(VALIDATE) done"
 
 .PHONY: validate_my
 validate_my: check_validation_environment
-	@echo "# VALIDATING MYSQL..."
+	@echo "# $@ $(VALIDATE) start"
 	$(MAKE) AUTH1=$(auth2) AUTH2=$(auth2) pgcopts+=' -X -N' $(VALIDATE)_my
 	$(MAKE) AUTH1=$(auth2) AUTH2=$(auth2) pgcopts+=' -A -N' $(VALIDATE)_my
 	$(MAKE) AUTH1=$(auth2) AUTH2=$(auth2) pgcopts+=' -X -T' $(VALIDATE)_my
 	$(MAKE) AUTH1=$(auth2) AUTH2=$(auth2) pgcopts+=' -A -T' $(VALIDATE)_my
+	@echo "# $@ $(VALIDATE) done"
 
 .PHONY: validate_mix
 validate_mix: check_validation_environment
-	@echo "# VALIDATING MIXED..."
+	@echo "# $@ $(VALIDATE) start"
 	$(MAKE) AUTH1=$(auth1) AUTH2=$(auth2) pgcopts+=' -X -N' $(VALIDATE)_mix
 	$(MAKE) AUTH1=$(auth2) AUTH2=$(auth1) pgcopts+=' -X -N' $(VALIDATE)_mix
 	$(MAKE) AUTH1=$(auth1) AUTH2=$(auth2) pgcopts+=' -A -N' $(VALIDATE)_mix
 	$(MAKE) AUTH1=$(auth2) AUTH2=$(auth1) pgcopts+=' -A -N' $(VALIDATE)_mix
+	@echo "# $@ $(VALIDATE) done"
 
 .PHONY: validate
 validate: check_validation_environment
-	echo "# VALIDATING..." ; \
+	@echo "# $@ $(VALIDATE) start"
 	$(MAKE) validate_pg && \
 	$(MAKE) validate_my && \
 	$(MAKE) validate_mix ; \
 	echo "# $@ $(VALIDATE) done in $$SECONDS seconds"
+	@echo "# $@ $(VALIDATE) done"
 
 ########################################################### STANDARD VALIDATION
 
 # 3*10 runs, about 30 seconds.
 .PHONY: validate_sanity
 validate_sanity:
+	@echo "# $@ start"
 	$(MAKE) VALIDATE=sanity validate
+	@echo "# $@ done"
 
 # fast validation is 300 runs, on Ankh:
 # - TOTAL=9 ROWS=10 ~ 4 minutes
@@ -264,18 +272,21 @@ validate_sanity:
 # - TOTAL=8 ROWS=10000 ~ 10 minutes
 # - TOTAL=100 ROWS=10000 ~ 10 minutes
 # - TOTAL=500 ROWS=10000 ~ 11 minutes
-#    pg: 3 * 12 *     2
-#    my: 3 * 12 *     4 # hmmm, seems slow...
-#   mix: 3 * (12-5 noxor) * 2 * 2
-# total: 72 + 144 + 84 = 300
+#    pg: 3 * 12 * 2
+#    my: 3 * 12 * 4 # hmmm, seems slow...
+#   mix: 3 * 12 * 4
+# total: 72 + 144 + 144 = 360
 .PHONY: validate_fast
 validate_fast:
+	@echo "# $@ start"
 	$(MAKE) VALIDATE=fast validate
+	@echo "# $@ done"
 
 # 8*300 = 2400 tests, about 60 minutes on Ankh
 # default validate_fast is TOTAL=8 ROWS=100 so it is not included
 .PHONY: validate_hour
 validate_hour:
+	@echo "# $@ start"
 	$(MAKE) TOTAL=9    ROWS=10    validate_fast # 4
 	$(MAKE) TOTAL=4    ROWS=100   pgcopts+=' --where "id>20"' validate_fast
 	$(MAKE) TOTAL=8    ROWS=1000  validate_fast # 7
@@ -284,6 +295,7 @@ validate_hour:
 	$(MAKE) TOTAL=8    ROWS=10000 validate_fast # 10
 	$(MAKE) TOTAL=100  ROWS=10000 validate_fast # 11
 	$(MAKE) TOTAL=1000 ROWS=10000 validate_fast # 12
+	@echo "# $@ done"
 
 # full validate: 16128 tests, at least 5 hours?
 #    pg: 3 * (7*3*2*2*2*2*2) * 2   = 3 * 672 * 2 = 4032
@@ -292,19 +304,22 @@ validate_hour:
 # total: 16128
 .PHONY: validate_full
 validate_full:
+	@echo "# $@ start"
 	$(MAKE) VALIDATE=full validate
+	@echo "# $@ done"
 
 ############################################################ FEATURE VALIDATION
 
 # tests some options without setting rows
-# 60+18+90 = 168
-# 24+96+60 = 180
+# 60+18+90+9 = 177
+# 24+96+60   = 180
 .PHONY: validate_feature
 validate_feature:
 	@echo "# $@ ROWS=$(ROWS) start"
 	$(MAKE) validate_cc
 	$(MAKE) validate_auto   # pgsql only
 	$(MAKE) validate_empty
+	$(MAKE) validate_quote
 	[ $(ROWS) = 10 ] && $(MAKE) validate_engine || exit 0 # mysql only
 	[ $(ROWS) = 10 ] && $(MAKE) validate_width || exit 0
 	[ $(ROWS) = 10 ] && $(MAKE) validate_nullkey || exit 0
@@ -382,6 +397,17 @@ validate_nullkey:
 	$(MAKE) crtopts+=' --null-key' KEYS=1 COLS=2 ROWS=10 validate
 	@echo "# $@ done"
 
+# validate with a quoted table names
+# ??? should also test column names?
+# 3*3 = 9 runs
+.PHONY: validate_quote
+validate_quote:
+	@echo "# $@ start"
+	$(MAKE) tab1=\"foo1\" tab2=public.\"foo2\"     ROWS=10 validate_pg
+	$(MAKE) tab1=\"foo1\" tab2=\"public\".\"foo2\" ROWS=10 validate_pg
+	$(MAKE) tab1=\`foo1\` tab2=\`foo2\`            ROWS=10 validate_my
+	@echo "# $@ done"
+
 ####################################################################### RELEASE
 
 # about 10 minutes
@@ -390,10 +416,12 @@ validate_nullkey:
 # 348+168+300 = 816
 .PHONY: validate_release
 validate_release:
+	@echo "# $@ start"
 	$(MAKE) ROWS=10   validate_feature && \
 	$(MAKE) ROWS=1000 validate_feature && \
 	$(MAKE)           validate_fast && \
 	echo "# $@ done in $$SECONDS seconds"
+	@echo "# $@ done"
 
 ################################################################### PERFORMANCE
 #

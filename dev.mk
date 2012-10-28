@@ -1,4 +1,4 @@
-# $Id: dev.mk 1292 2012-08-16 20:54:07Z fabien $
+# $Id: dev.mk 1398 2012-10-28 10:52:01Z fabien $
 
 # script distribution
 dir	= $(name)
@@ -11,7 +11,8 @@ REVISION= $(shell svnversion)
 F.c	= $(wildcard *.c)
 F.sql	= $(wildcard *.sql)
 F.in	= $(wildcard *.in)
-F.dist 	= $(F.c) $(F.sql) $(F.in) $(DOCS) $(DATA) $(name) \
+# $(DATA): already in $(F.sql)
+F.dist 	= $(F.c) $(F.sql) $(F.in) $(DOCS) $(name) \
 		INSTALL LICENSE Makefile
 
 # default target
@@ -35,7 +36,7 @@ tgz: $(name)-$(VERSION).tgz
 # for a new version, run in the .. directory: make version=1.8.2 publish
 # then edit pg_comparator.pl and ../local.mk to fix the version as well.
 # keep a copy of the targz in ~/SAVE/SOFTS/
-# distribute on pgfoundry.
+# distribute manually on pgfoundry.
 $(name)-$(VERSION).tgz: $(F.dist)
 	ln -s . $(name)-$(VERSION) ; \
 	tar czf $@ $(addprefix $(name)-$(VERSION)/, $(F.dist)) ; \

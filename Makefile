@@ -1,4 +1,4 @@
-# $Id: Makefile 1349 2012-08-19 16:56:24Z fabien $
+# $Id: Makefile 1383 2012-08-20 14:18:53Z fabien $
 
 #
 # PostgreSQL stuff
@@ -12,7 +12,8 @@ DATA_built	= $(MODULES:%=%.sql)
 DATA		= xor_aggregate.sql
 DOCS		= README.$(name) \
 		  README.xor_aggregate \
-		  README.checksum
+		  README.pgc_checksum \
+		  README.pgc_casts
 
 EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp
 

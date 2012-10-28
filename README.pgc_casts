@@ -1,0 +1,7 @@
+provide useful casts for pg_comparator:
+ - bytea to/from bit & varbit,
+ - bit & varbit to int2.
+
+load with:
+
+	sh> psql < <path-to-postgresql>/share/contrib/pgc_casts.sql

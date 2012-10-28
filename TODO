@@ -1,6 +1,7 @@
 * distribution
 - use EXTENSION framework?
 - integrate to pgxn?
+- add test.mk & scripts?
 
 * asynchronous queries
 - could push statements from lists..
@@ -12,6 +13,3 @@
   at ./pg_comparator line 1264.
 - under -T may not really stop on errors?
 - under -T, should I lock shared variables before updating them?
-
-* validation
-- check with NULL in keys. id=? with NULL is not a good idea...

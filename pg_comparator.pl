@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 #
-# $Id: pg_comparator.pl 1375 2012-08-20 09:15:10Z fabien $
+# $Id: pg_comparator.pl 1401 2012-10-28 13:42:01Z fabien $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -8,7 +8,7 @@
 #
 
 use strict;   # I don't like perl
-use warnings; # I dont trust perl
+use warnings; # neither do I trust perl
 
 =head1 NAME
 
@@ -93,14 +93,17 @@ and the bandwidth is high.
 
 =item C<--checksum-size=n> or C<--check-size=n> or C<--cs=n> or C<-z n>
 
-Checksum size, must be B<2>, B<4> or B<8> bytes.
+Tuple checksum size, must be B<2>, B<4> or B<8> bytes.
+The key checksum size is always 4 bytes long.
 
-Default is B<8>. There should be no reason to change that.
+Default is B<8>, so that the false negative probability is very low.
+There should be no reason to change that.
 
 =item C<--cleanup>
 
 Drop checksum and summary tables beforehand.
-Useful after a run with C<--no-temp> and C<--no-clear>.
+Useful after a run with C<--no-temp> and C<--no-clear>, typically used
+for debugging.
 
 Default is not to drop because it is not needed.
 
@@ -109,6 +112,7 @@ Default is not to drop because it is not needed.
 Drop checksum and summary tables explicitly after the computation.
 Note that they are dropped implicitly by default when the connection
 is closed as they are temporary, see C<-(-no)-temporary> option.
+This option is useful for debugging.
 
 Default is B<not> to clear explicitely the checksum and summary tables,
 as it is not needed.
@@ -121,16 +125,18 @@ debug so as to allow testing under different conditions.
 
 Default is not to run in debug mode.
 
-=item C<--env-pass=var>
+=item C<--env-pass='var'>
 
 Take password from environment variables C<var1>, C<var2> or C<var>
 for connection one, two, or both.
 This is tried before asking interactively if C<--ask-pass> is also set.
 
+Default is not to look for passwords from environment variables.
+
 =item C<--expect n> or C<-e n>
 
 Total number of differences to expect (updates, deletes and inserts).
-This option is used by non regression tests.
+This option is only used for non regression tests. See the TESTS section.
 
 =item C<--folding-factor=7> or C<-f 7>
 
@@ -155,6 +161,8 @@ the tables to compare. This option also requires option C<--tuple-checksum>.
 See also the EXAMPLES section below for how to set a checksum trigger.
 Consider C<--use-key> instead if you already have a reasonably distributed
 integer primary key.
+
+Default is to build both key and tuple checksums on the fly.
 
 =item C<--lock>, C<--no-lock>
 
@@ -253,7 +261,7 @@ Take full control of DBI data source specification and mostly ignore
 the comparison authentication part of the source or target URLs.
 One can connect with "DBI:Pg:service=backup", use an alternate driver,
 set any option allowed by the driver...
-See C<man DBD::Pg> and C<man DBD:mysql> for the various options that can
+See L<DBD::Pg> and L<DBD:mysql> manuals for the various options that can
 be set through the DBI data source specification.
 However, the database server specified in the URL must be consistent with
 this source specification so that the queries' syntax is the right one.
@@ -263,7 +271,7 @@ Default is to rely on the two URL arguments.
 =item C<--stats=(txt|csv)>
 
 Show various statistics about the comparison performed in this format.
-Also, option C<--stats-name> gives the test a name, usefull to generate csv
+Also, option C<--stats-name> gives the test a name, useful to generate csv
 files that will be processed automatically.
 
 Default is B<not> to show statistics, because it requires additional
@@ -281,7 +289,7 @@ Default is not to synchronize.
 
 Whether to use temporary tables. If you don't, the tables are kept by default
 at the end, so they will have to be deleted by hand. See C<--clear> option
-to request a cleanup.
+to request a cleanup. This option is useful for debugging.
 
 Default is to use temporary tables that are automatically wiped out when the
 connection is closed.
@@ -296,7 +304,6 @@ Perl threads are rather heavy and slow, more like communicating processes than
 light weight threads, really.
 
 This does NOT work at all with PostgreSQL.
-
 It works partially with MySQL, at the price of turning off C<--transaction>.
 
 Default is B<not> to use threads, as it does not work for all databases.
@@ -305,7 +312,7 @@ Default is B<not> to use threads, as it does not work for all databases.
 
 Timeout comparison after C<n> seconds.
 
-Default is not to timeout. Be patient.
+Default is no timeout. Be patient.
 
 =item C<--transaction>, C<--no-transaction>
 
@@ -322,7 +329,7 @@ or C<--key-checksum=...> above. The provided checksum attributes must
 not appear in the lists of key and value columns.
 See also the EXAMPLES section below for how to set a checksum trigger.
 
-Default is to build both checksums on the fly.
+Default is to build both key and tuple checksums on the fly.
 
 =item C<--use-key> or C<-u>
 
@@ -528,8 +535,9 @@ It must be deleted from 2 to synchronize it wrt table 1.
 
 =back
 
-In case of key-checksum or data-checksum collision, false negative results
-may occur. Changing the checksum function would help in such cases.
+In case of tuple checksum collisions, false negative results may occur.
+Changing the checksum function would help in such cases.
+See the ANALYSIS sub-section.
 
 =head1 DEPENDENCES
 
@@ -546,11 +554,13 @@ The C<COALESCE> function takes care of NULL values in columns.
 A checksum function must be used to reduce and distribute key
 and columns values. It may be changed with the C<--checksum> option.
 Its size can be selected with the C<--checksize> option (currently 2, 4 or 8
-bytes).
+bytes). The checksums also require casts to be converted to integers of
+various sizes.
 
 Suitable implementations are available for PostgreSQL and can be loaded into
-the server by processing C<share/contrib/pgc_checksum.sql>. New checksums and
-casts are also available for MySQL, see C<mysql_*.sql>.
+the server by processing C<share/contrib/pgc_checksum.sql> and
+C<share/contrib/pgc_casts.sql>. New checksums and casts are also available
+for MySQL, see C<mysql_*.sql>.
 
 =item 3
 
@@ -570,29 +580,29 @@ Moreover several perl modules are useful to run this script:
 
 =item
 
-C<Getopt::Long> for option management.
+L<Getopt::Long> for option management.
 
 =item
 
-C<DBI>,
-C<DBD::Pg> to connect to PostgreSQL,
-and C<DBD::mysql> to connect to MySQL.
+L<DBI>,
+L<DBD::Pg> to connect to PostgreSQL,
+and L<DBD::mysql> to connect to MySQL.
 
 =item
 
-C<Term::ReadPassword> for C<--ask-pass> option.
+L<Term::ReadPassword> for C<--ask-pass> option.
 
 =item
 
-C<Pod::Usage> for doc self-extraction (C<--man> C<--opt> C<--help>).
+L<Pod::Usage> for doc self-extraction (C<--man> C<--opt> C<--help>).
 
 =item
 
-C<threads> for the experimental threaded version with option C<--threads>.
+L<threads> for the experimental threaded version with option C<--threads>.
 
 =back
 
-These modules are only loaded by the script if they are actually required.
+Modules are only loaded by the script if they are actually required.
 
 =head1 ALGORITHM
 
@@ -815,6 +825,23 @@ stuff.
 This script is reasonably tested, but due to its proof of concept nature
 there is a lot of options the combination of which cannot all be tested.
 
+=head2 NOTE
+
+If the tables to compare are in the same database, a simple SQL
+query can extract the differences. Assuming Tables I<T1> and I<T2>
+with primary key I<id> and non null contents I<data>, then their
+differences is summarized by the following query:
+
+	SELECT COALESCE(T1.id, T2.id) AS key,
+	  CASE WHEN T1.id IS NULL THEN 'DELETE'
+	       WHEN T2.id IS NULL THEN 'INSERT'
+	       ELSE 'UPDATE'
+	  END AS operation
+	FROM T1 FULL JOIN T2 USING (id)
+	WHERE T1.id IS NULL      -- DELETE
+	   OR T2.id IS NULL      -- INSERT
+	   OR T1.data <> T2.data -- UPDATE
+
 =head2 REFERENCES
 
 A paper was presented at a conference about this tool and its algorithm:
@@ -824,12 +851,12 @@ Advances in Databases, Knowledge, and Data Applications (DBKDA),
 pp 23-28, St Marteen, The Netherlands Antilles, January 2011.
 ISBN: 978-1-61208-002-4.
 Copyright IARIA 2011.
-Online at L<http://www.thinkmind.org/index.php?view=article&articleid=dbkda_2011_2_10_30021>.
+Online at L<Think Mind|http://www.thinkmind.org/index.php?view=article&articleid=dbkda_2011_2_10_30021>.
 
 The algorithm and script was inspired by
 B<Taming the Distributed Database Problem: A Case Study Using MySQL>
 by I<Giuseppe Maxia> in B<Sys Admin> vol 13 num 8, Aug 2004, pp 29-40.
-See L<http://www.perlmonks.org/index.pl?node_id=381053> for details.
+See L<Perl Monks|http://www.perlmonks.org/index.pl?node_id=381053> for details.
 In this paper, three algorithms are presented.
 The first one compares two tables with a checksum technique.
 The second one finds UPDATE or INSERT differences based on a 2-level
@@ -852,7 +879,7 @@ and values.
 
 =head1 SEE ALSO
 
-I<Michael Nacos> made a robust implementation L<http://pgdba.net/pg51g/>
+I<Michael Nacos> made a robust implementation L<pg51g|http://pgdba.net/pg51g/>
 based on triggers. He also noted that although database contents are compared
 by the algorithm, the database schema differences can I<also> be detected
 by comparing system tables which describe them.
@@ -865,39 +892,77 @@ There is an interesting discussion in Chapter 7, where experiments are
 presented with a Java/JDBC/MySQL implementation of two algorithms, including
 this one.
 
-Some products or projects implement such features, for instance:
-L<http://code.google.com/p/maatkit/> (mk-table-sync, by I<Baron Schwartz>,
-see L<http://tinyurl.com/mysql-data-diff-algorithm>)
-(formerly L<http://sourceforge.net/projects/mysqltoolkit>).
+I<Baron Schwartz> discusses comparison algorithms in an
+L<online post|http://tinyurl.com/mysql-data-diff-algorithm>.
 
 Some more links:
-L<http://www.altova.com/databasespy/>,
-L<http://www.citrustechnology.com/solutions/data-comparison>,
-L<http://comparezilla.sourceforge.net/>,
-L<http://www.dbbalance.com/db_comparison.htm>,
-L<http://www.dbsolo.com/datacomp.html>,
-L<http://www.devart.com/dbforge/sql/datacompare/>,
-L<http://www.dkgas.com/dbdiff.htm>,
-L<http://www.programurl.com/software/sql-server-comparison.htm>,
-L<http://www.red-gate.com/products/sql-development/sql-data-compare/>,
-L<http://www.sql-server-tool.com/>,
-L<http://www.webyog.com/>,
-L<http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>.
 
-If the tables to compare are in the same database, a simple SQL
-query can extract the differences. Assuming Tables I<T1> and I<T2>
-with primary key I<id> and non null contents I<data>, then their
-differences is summarized by the following query:
+=over 2
 
-	SELECT COALESCE(T1.id, T2.id) AS key,
-	  CASE WHEN T1.id IS NULL THEN 'DELETE'
-	       WHEN T2.id IS NULL THEN 'INSERT'
-	       ELSE 'UPDATE'
-	  END AS operation
-	FROM T1 FULL JOIN T2 USING (id)
-	WHERE T1.id IS NULL      -- DELETE
-	   OR T2.id IS NULL      -- INSERT
-	   OR T1.data <> T2.data -- UPDATE
+=item *
+L<Adept SQL|http://www.adeptsql.com/>
+
+=item *
+L<Altova Database Spy|http://www.altova.com/databasespy/>
+
+=item *
+L<AUI Soft SQLMerger|http://auisoft.com/sqlmerger/>
+
+=item *
+L<Citrus Tech Data Comparison|http://www.citrustechnology.com/solutions/data-comparison>
+
+=item *
+L<Clever Components dbcomparer|http://www.clevercomponents.com/products/dbcomparer/>
+
+=item *
+L<Comparezilla|http://comparezilla.sourceforge.net/>
+
+=item *
+L<Datanamic Datadiff|http://www.datanamic.com/datadiff/>
+
+=item *
+L<DB Balance|http://www.dbbalance.com/db_comparison.htm>
+
+=item *
+L<DBSolo datacomp|http://www.dbsolo.com/datacomp.html>
+
+=item *
+L<Devart DataCompare|http://www.devart.com/dbforge/sql/datacompare/>
+
+=item *
+L<DiffKit|http://www.diffkit.org/>
+
+=item *
+L<DKGAS DBDiff|http://www.dkgas.com/dbdiff.htm>
+
+=item *
+L<Maakit mk-table-sync|http://code.google.com/p/maatkit/>
+
+=item *
+L<MySQL DBCompare|http://dev.mysql.com/doc/workbench/en/mysqldbcompare.html>
+
+=item *
+L<List of SQL Server Tools|http://www.programurl.com/software/sql-server-comparison.htm>
+
+=item *
+L<Red Gate SQL Data Compare|http://www.red-gate.com/products/sql-development/sql-data-compare/>
+
+=item *
+L<Spectral Core OmegaSync|http://www.spectralcore.com/omegasync/>,
+
+=item *
+L<SQL Delta|http://www.sqldelta.com/>
+
+=item *
+L<AlfaAlfa SQL Server Comparison Tool|http://www.sql-server-tool.com/>
+
+=item *
+L<SQLyog MySQL GUI|http://www.webyog.com/>
+
+=item *
+L<xSQL Software Data Compare|http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>
+
+=back
 
 =head1 TESTS
 
@@ -909,37 +974,38 @@ when the software is upgraded:
 
 =over 4
 
-=item I<sanity> validation - about 30 seconds & 30 runs
+=item I<sanity> - about 30 seconds & 30 runs
 
 Run a comparison, synchronization & check for all databases combinaisons
 and all working asynchronous queries and threading options.
 
-=item I<fast> validation - about 8 minutes & 300 runs
+=item I<fast> - about 5 minutes & 360 runs
 
 Run 12 tests similar to the previous one with varrying options (number of
 key columns, number of value columns, aggregate function, checksum function,
 null handling, folding factor, table locking or not...).
 
-=item I<feature> validation - about 2 minutes & 168 or 348 runs
+=item I<feature> - about 3-4 minutes & 177 or 357 runs
 
 Test various features:
 I<cc> for checksum computation strategies,
-I<auto> for trigger-maintained checksums,
+I<auto> for trigger-maintained checksums on PostgreSQL,
 I<empty> for corner cases with empty tables,
+I<quote> for table quoting,
 I<engine> for InnoDB vs MyISAM MySQL backends,
 I<width> for large columns,
 I<nullkey> for possible NULL values in keys.
 
-=item I<release> validation - about 12 minutes & 816 runs
+=item I<release> - about 12 minutes & 876 runs
 
 This is the I<feature> with two table sizes and the I<fast> validations.
 
-=item I<hour> validation - about 1 hour & 2400 runs
+=item I<hour> - about 1 hour & 2880 runs
 
 A combination of 8 I<fast> validations with varrying table sizes and
 difference ratio ranging from 0.1% to 99.9%.
 
-=item I<full> validation - about 6 hours, seldom run
+=item I<full> - about 6 hours & 16128 runs... seldom run
 
 A combinatorial test involving numerous options: aggregation, checksums,
 null handling, foldings, number of key and value attributes...
@@ -977,12 +1043,21 @@ There are too many options.
 
 =head1 VERSIONS
 
-See L<http://pgfoundry.org/projects/pg-comparator/> for the latest version.
-My web site for the tool is L<http://www.coelho.net/pg_comparator/>.
+See L<PG Foundry|http://pgfoundry.org/projects/pg-comparator/> for the latest
+version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 
 =over 4
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
+
+Fix an issue when table names were quoted, raised by I<Robert Coup>.
+Improved documentation, especially Section L</"SEE ALSO">.
+More precise warning.
+Improved validation.
+The I<release> and I<hour> validations were run successfully
+on PostgreSQL 9.2.1 and MySQL 5.5.27.
+
+=item B<version 2.1.1> 2012-08-20 (r1375)
 
 Synchronization now handles possible NULLs in keys.
 Warn if key is nullable or not an integer under C<--use-key>.
@@ -1157,7 +1232,7 @@ as suggested by I<Erik Aronesty>.
 
 =item B<version 1.3> 2004-08-31 (r239)
 
-Project moved to L<http://pgfoundry.org/>.
+Project moved to L<PG Foundry|http://pgfoundry.org/>.
 Use cksum8 checksum function by default.
 Minor doc updates.
 
@@ -1199,7 +1274,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1375 $';
+my $revision = '$Revision: 1401 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1579,16 +1654,29 @@ sub db_quote($$)
 
 ####################################################################### QUERIES
 
-# returns (schema, table)
+# return unquoted (schema, table)
 sub table_id($$)
 {
   my ($db, $table) = @_;
-  # ??? quotes are kept
-  # no 'schema' under MySQL... well, there is, but it is named 'database'...
-  return (undef, $table) if $db eq 'mysql';
-  # else $db eq 'pgsql'
-  return split '\.', $table if $table =~ /\./;
-  return ('', $table);
+  if ($db eq 'pgsql') {
+    # ??? this is not really a parser as it should be...
+    die "too many '.' in table $table" if $table =~ /\..*\./;
+    if ($table =~ /\./) {
+      my ($s, $t) = split '\.', $table;
+      return (db_unquote($db, $s), db_unquote($db, $t));
+    }
+    else {
+      $table = db_unquote($db, $table);
+      return ('', $table);
+    }
+  }
+  elsif ($db eq 'mysql')
+  {
+    $table = db_unquote($db, $table);
+    # no 'schema' under MySQL... well, there is one, but it is named 'database'.
+    return (undef, $table) if $db eq 'mysql';
+  }
+  die "unexpected db $db";
 }
 
 # get all attribute names, possibly ignoring a set of columns
@@ -2215,7 +2303,7 @@ sub differences($$$$$$$$$$@)
 	  #print "read 2: $kcs2, $tcs2", defined $key2? $key2:'', "\n";
 	}
       }
-      # nothing left on both side, merge is completed
+      # nothing left on both side, merge is complete
       last unless defined $kcs1 or defined $kcs2;
       #debug: verb 6, "merging: @r1 / @r2" if $verb>=6;
       # else at least one of the list contains something
@@ -2404,7 +2492,8 @@ if ($threads and not $debug)
   # it seems that statements are closed when playing with threads
   # so we cannot use transactions.
   $do_trans = 0, $changed++ unless $do_trans==0;
-  warn "WARNING $changed options fixed for threads..." if $changed;
+  #warn "WARNING $changed options fixed for threads..." if $changed;
+  warn "WARNING option '--transaction' disabled for threads..." if $changed;
   # note: do_lock & temp==0 seems a bad idea.
 }
 
