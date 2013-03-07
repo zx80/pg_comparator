@@ -1,3 +1,8 @@
+* extend
+- libdbd-firebird-perl: FireBird
+- libdbd-sybase-perl: Sybase & MS SQL server
+- others?
+
 * distribution
 - use EXTENSION framework?
 - integrate to pgxn?

@@ -1,6 +1,6 @@
-#! /usr/bin/perl
+#!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1401 2012-10-28 13:42:01Z fabien $
+# $Id: pg_comparator.pl 1473 2013-03-07 20:41:38Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -21,9 +21,9 @@ B<pg_comparator> [options as B<--help> B<--option> B<--man>] conn1 conn2
 =head1 DESCRIPTION
 
 This script performs a network and time efficient comparison or
-synchronization of two possibly large tables on two B<PostgreSQL> or B<MySQL>
-database servers, so as to detect inserted, updated or deleted tuples between
-these tables.
+synchronization of two possibly large tables in B<PostgreSQL>, B<MySQL>
+or B<SQLite> databases, so as to detect inserted, updated or deleted tuples
+between these tables.
 The algorithm is efficient especially if the expected differences are
 relatively small.
 
@@ -49,9 +49,11 @@ of the option name.
 
 Aggregation function to be used for summaries, either B<xor> or B<sum>.
 It must operate on the result of the checksum function.
-For PostgreSQL, the B<xor> aggregate needs to be loaded.
-There is a signed/unsigned issue on the key hash when using xor for comparing
-tables on MySQL vs PostgreSQL.
+For PostgreSQL and SQLite, the B<xor> aggregate needs to be loaded.
+There is a signed/unsigned issue on the key hash when using B<xor> for
+comparing tables on MySQL or SQLite vs PostgreSQL.
+We provide a new C<ISUM> aggregate for SQLite because both C<SUM> and C<TOTAL>
+do some incompatible handling of integer overflows.
 
 Default is B<sum> because it is available by default and works in mixed mode.
 
@@ -83,13 +85,13 @@ Default is B<create> because it always works for both databases.
 =item C<--checksum-function=fun> or C<--cf=fun> or C<-c fun>
 
 Checksum function to use, either B<ck> or B<md5>.
-For both PostgreSQL and MySQL the provided B<ck> checksum functions must be
+For PostgreSQL, MySQL and SQLite the provided B<ck> checksum functions must be
 loaded into the target databases.
-Choosing B<md5> does not come free either, the provided cast functions
-must be loaded into the target databases.
+Choosing B<md5> does not come free either: the provided cast functions must be
+loaded into the target databases and the computation is more expensive.
 
 Default is B<ck>, which is faster, especially if the operation is cpu-bound
-and the bandwidth is high.
+and the bandwidth is reasonably high.
 
 =item C<--checksum-size=n> or C<--check-size=n> or C<--cs=n> or C<-z n>
 
@@ -261,7 +263,7 @@ Take full control of DBI data source specification and mostly ignore
 the comparison authentication part of the source or target URLs.
 One can connect with "DBI:Pg:service=backup", use an alternate driver,
 set any option allowed by the driver...
-See L<DBD::Pg> and L<DBD:mysql> manuals for the various options that can
+See C<DBD::Pg> and C<DBD:mysql> manuals for the various options that can
 be set through the DBI data source specification.
 However, the database server specified in the URL must be consistent with
 this source specification so that the queries' syntax is the right one.
@@ -389,11 +391,20 @@ defaults and overrides, so what actually happens may not always be clear.
 
 =item B<driver>
 
-Database driver to use. Use B<pgsql> for PostgreSQL, and B<mysql> for MySQL.
+Database driver to use.
+Use B<pgsql> for PostgreSQL, B<mysql> for MySQL, B<sqlite> for SQLite.
 Heterogeneous databases may be compared and synchronized, however beware that
 subtle typing, encoding and casting issues may prevent heterogeneous
 comparisons or synchronizations to succeed.
 Default is B<pgsql> for the first connection, and same as first for second.
+
+For SQLite, the authentication part of the URL (login, pass, host, port)
+is expected to be empty, thus the full URL should look like:
+
+  sqlite:///base.db/table?key,col:other,columns
+
+Moreover, setting the PGC_SQLITE_LOAD_EXTENSION environment variable with
+C<:>-separated shared object files loads these into SQLite.
 
 =item B<login>
 
@@ -424,6 +435,10 @@ Default is 5432 for PostgreSQL and 3306 for MySQL.
 
 Database catalog to connect to. Default is username for first connection.
 Default is same as first connection for second connection.
+For SQLite, provide the database file name. The path is relative by
+default, but can be made absolute by prepending an additional '/':
+
+  sqlite:////var/cache/sqlite/base.db/table?...
 
 =item B<schema.table>
 
@@ -449,7 +464,8 @@ your tuples, then there is no point in looking for differences.
 Comma-separated list of columns to compare. May be empty.
 Default is all columns but B<keys> for first connection.
 Default is same as first connection for second connection.
-Beware that C<...?key:> means an empty cols, while C<...?key> sets the default.
+Beware that C<...?key:> means an empty cols, while C<...?key>
+sets the default by querying table metadata.
 
 =back
 
@@ -560,7 +576,8 @@ various sizes.
 Suitable implementations are available for PostgreSQL and can be loaded into
 the server by processing C<share/contrib/pgc_checksum.sql> and
 C<share/contrib/pgc_casts.sql>. New checksums and casts are also available
-for MySQL, see C<mysql_*.sql>.
+for MySQL, see C<mysql_*.sql>. An loadable implementation of suitable
+checksum functions is also available for SQLite, see C<sqlite_checksum.*>.
 
 =item 3
 
@@ -572,6 +589,9 @@ Suitable implementations of a exclusive-or C<xor> aggregate are available
 for PostgreSQL and can be loaded into the server by processing
 C<share/contrib/xor_aggregate.sql>.
 
+The C<sqlite_checksum.*> file also provides a C<xor> and C<sum> aggregates
+for SQLite that are compatible with other databases.
+
 =back
 
 Moreover several perl modules are useful to run this script:
@@ -580,25 +600,30 @@ Moreover several perl modules are useful to run this script:
 
 =item
 
-L<Getopt::Long> for option management.
+C<Getopt::Long> for option management.
 
 =item
 
-L<DBI>,
-L<DBD::Pg> to connect to PostgreSQL,
-and L<DBD::mysql> to connect to MySQL.
+C<DBI>,
+C<DBD::Pg> to connect to PostgreSQL,
+C<DBD::mysql> to connect to MySQL,
+and C<DBD::SQLite> to connect to SQLite.
 
 =item
 
-L<Term::ReadPassword> for C<--ask-pass> option.
+C<Term::ReadPassword> for C<--ask-pass> option.
 
 =item
 
-L<Pod::Usage> for doc self-extraction (C<--man> C<--opt> C<--help>).
+C<Pod::Usage> for doc self-extraction (C<--man> C<--opt> C<--help>).
 
 =item
 
-L<threads> for the experimental threaded version with option C<--threads>.
+C<threads> for the experimental threaded version with option C<--threads>.
+
+=item
+
+C<Digest::MD5> for md5 checksum with SQLite.
 
 =back
 
@@ -761,7 +786,7 @@ is better than I<k*f*ceil(log(n)/log(f))*(c+log(n))>.
 the contents of I<k> blocks of size I<f> is transferred on the depth
 of the tree, and each block identifier is of size I<log(n)> and contains
 a checksum I<c>.
-it is independent of I<r>, and you want I<k<<n>.
+It is independent of I<r>, and you want I<k<<n>.
 The volume of the SQL requests is about I<k*log(n)*ceil(log(n)/log(f))>,
 as the list of non matching checksums I<k*log(n)> may be dragged
 on the tree depth.
@@ -779,9 +804,11 @@ is about I<n*r+n*ln(n)*(f/(f-1))>.
 
 I<i.e.> part of the tables are considered equal although they are different.
 With a perfect checksum function, this is the probability of a checksum
-collision at any point where they are computed: about I<n*(f/(f-1))*2**-c>.
-For a million row table with the default algorithm parameter values, this is
-about I<2**20 / 2**64>, that is about one chance in I<2**44> merge runs.
+collision at any point where they are computed and should have been different:
+about I<k*ceil(log(n)/log(f))*2**-c>.
+For a million row table, expecting 1000 changes with the default algorithm
+parameter values, this is about I<2**10 *3/2**64>, that is about one chance
+in I<2**52> merge runs.
 
 =back
 
@@ -927,7 +954,7 @@ L<DB Balance|http://www.dbbalance.com/db_comparison.htm>
 L<DBSolo datacomp|http://www.dbsolo.com/datacomp.html>
 
 =item *
-L<Devart DataCompare|http://www.devart.com/dbforge/sql/datacompare/>
+L<dbForge Data Compare|http://www.devart.com/dbforge/sql/datacompare/>
 
 =item *
 L<DiffKit|http://www.diffkit.org/>
@@ -943,6 +970,9 @@ L<MySQL DBCompare|http://dev.mysql.com/doc/workbench/en/mysqldbcompare.html>
 
 =item *
 L<List of SQL Server Tools|http://www.programurl.com/software/sql-server-comparison.htm>
+
+=item *
+L<SQL Server tablediff Utility|http://msdn.microsoft.com/en-US/library/ms162843.aspx>
 
 =item *
 L<Red Gate SQL Data Compare|http://www.red-gate.com/products/sql-development/sql-data-compare/>
@@ -985,7 +1015,7 @@ Run 12 tests similar to the previous one with varrying options (number of
 key columns, number of value columns, aggregate function, checksum function,
 null handling, folding factor, table locking or not...).
 
-=item I<feature> - about 3-4 minutes & 177 or 357 runs
+=item I<feature> - about 5 minutes & 168 or 474 runs
 
 Test various features:
 I<cc> for checksum computation strategies,
@@ -994,11 +1024,15 @@ I<empty> for corner cases with empty tables,
 I<quote> for table quoting,
 I<engine> for InnoDB vs MyISAM MySQL backends,
 I<width> for large columns,
-I<nullkey> for possible NULL values in keys.
+I<nullkey> for possible NULL values in keys,
+I<sqlite> for SQLite test,
+I<mylite> for SQLite/MySQL mixed mode with some restrictions,
+I<pglite> for SQLite/PostgreSQL mixed mode with some restrictions.
 
-=item I<release> - about 12 minutes & 876 runs
+=item I<release> - about 20 minutes & 938 runs
 
-This is the I<feature> with two table sizes and the I<fast> validations.
+This is I<feature> with two table sizes, I<fast>, and I<collisions>
+to test possible hash collisions.
 
 =item I<hour> - about 1 hour & 2880 runs
 
@@ -1041,6 +1075,13 @@ This is not a bug, but a feature.
 
 There are too many options.
 
+Using another language such as Python for this application seems attractive,
+but there is no cleanly integrated manual-page style support such as POD, and
+the documentation is 50% of this script.
+
+Mixed SQLite vs PostgreSQL or MySQL table comparison may not work properly in
+all cases, because of SQLite dynamic type handling and reduced capabilities.
+
 =head1 VERSIONS
 
 See L<PG Foundry|http://pgfoundry.org/projects/pg-comparator/> for the latest
@@ -1049,6 +1090,23 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 =over 4
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
+
+Bug fix by I<Robert Coup>, which was triggered on hash collisions (again).
+This bug was introduced in 2.1.0 when getting rid of the key separator,
+and not caught by the validation.
+Factor out database dependencies in a separate data structure,
+so that adding new targets should be simpler in the future.
+Add SQLite support.
+Add experimental Firebird support.
+Fix some warnings.
+Update C<cksum8> function to propagate the first checksum half
+into the computation of the second half.
+Improved documentation.
+Improved validation, in particular with a I<collisions> test.
+The I<release> and I<hour> validations were run successfully
+on PostgreSQL 9.2.3 and MySQL 5.5.29.
+
+=item B<version 2.1.2> 2012-10-28 (r1402)
 
 Fix an issue when table names were quoted, raised by I<Robert Coup>.
 Improved documentation, especially Section L</"SEE ALSO">.
@@ -1274,7 +1332,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1401 $';
+my $revision = '$Revision: 1473 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1285,6 +1343,7 @@ my ($max_ratio, $max_levels, $report, $threads, $async) =  (0.1, 0, 1, 0, 1);
 my ($cleanup, $size, $usekey, $usenull, $synchronize) = (0, 0, 0, 1, 0);
 my ($do_it, $do_trans, $prefix, $ckcmp) = (0, 1, 'pgc_cmp', 'create');
 my ($maskleft, $name, $key_size, $col_size, $where) = (1, 'none', 0, 0, '');
+my ($expect_warn) = (0);
 # condition, tests, max size of blobs, data sources...
 my ($expect, $longreadlen, $source1, $source2, $key_cs, $tup_cs, $do_lock,
     $env_pass, $max_report, $stats);
@@ -1315,6 +1374,474 @@ sub verb($$)
   print STDERR '#' x $level, " $msg\n" if $level<=$verb;
 }
 
+############################################################ DATABASE SPECIFICS
+
+sub pgsql_cast($$) {
+  my ($s, $sz) = @_;
+  return "${s}::INT$sz";
+}
+
+sub mysql_cast($$) {
+  my ($s, $sz) = @_;
+  # MySQL casts are a joke, you cannot really select any target type.
+  # so I reimplemented that in a function which returns a BIGINT whatever.
+  return "biginttoint$sz(CAST($s AS SIGNED))";
+}
+
+sub sqlite_cast($$) {
+  my ($s, $sz) = @_;
+  # it seems that there is only one 8 byte signed integer type
+  #return "CAST($s AS INTEGER) & 255" if $sz == 1;
+  return "CAST($s AS INTEGER) & 65535" if $sz == 2;
+  return "CAST($s AS INTEGER) & 4294967295" if $sz == 4;
+  return "CAST($s AS INTEGER)" if $sz == 8;
+}
+
+sub firebird_cast($$) {
+  my ($s, $sz) = @_;
+  #return "BIN_AND(CAST(($s) AS INTEGER), 255)" if $sz == 1;
+  return "BIN_AND(CAST(($s) AS INTEGER), 65535)" if $sz == 2;
+  # argh! firebird casts detect overflows...
+  return "CAST(BIN_AND(($s), 2147483647) AS INTEGER)" if $sz == 4;
+  return "CAST(($s) AS BIGINT)" if $sz == 8;
+}
+
+sub pgsql_cksum_template($$) {
+  my ($algo, $sz) = @_;
+  return "CKSUM$sz((%s)::TEXT)" if $algo eq 'ck';
+  return pgsql_cast("DECODE(MD5(%s::TEXT),'hex')::BIT(" . 8*$sz . ")", $sz)
+    if $algo eq 'md5';
+  die "unexpected checksum $algo for pgsql";
+}
+
+sub mysql_cksum_template($$) {
+  my ($algo, $sz) = @_;
+  return "CKSUM$sz(CAST(%s AS BINARY))" if $algo eq 'ck';
+  return mysql_cast("CONV(LEFT(MD5(%s),". 2*$sz ."),16,10)", $sz)
+    if $algo eq 'md5';
+  die "unexpected checksum $algo for mysql";
+}
+
+sub sqlite_cksum_template($$) {
+  my ($algo, $sz) = @_;
+  return "CKSUM$sz(CAST(%s AS TEXT))" if $algo eq 'ck';
+  return "PGC_MD5($sz, CAST(%s AS TEXT))" if $algo eq 'md5';
+  die "unexpected checksum $algo for sqlite";
+}
+
+sub firebird_cksum_template($$) {
+  my ($algo, $sz) = @_;
+  return firebird_cast("HASH(CAST((%s) AS BLOB))", $sz) if $algo eq 'ck';
+  die "unexpected checksum $algo for firebird";
+}
+
+sub pgsql_null_template($$$) {
+  my ($null, $algo, $sz) = @_;
+  return "COALESCE(%s::TEXT,'NULL')" if $null eq 'text';
+  return 'COALESCE(' . pgsql_cksum_template($algo, $sz) . ',0)'
+    if $null eq 'hash';
+  die "unexpected null $null";
+}
+
+sub mysql_null_template($$$) {
+  my ($null, $algo, $sz) = @_;
+  return "COALESCE(CAST(%s AS BINARY),'NULL')"  if $null eq 'text';
+  return 'COALESCE(' . mysql_cksum_template($algo, $sz) . ',0)'
+    if $null eq 'hash';
+  die "unexpected null $null";
+}
+
+sub sqlite_null_template($$$) {
+  my ($null, $algo, $sz) = @_;
+  return "COALESCE(%s,'NULL')" if $null eq 'text';
+  return 'COALESCE(' . sqlite_cksum_template($algo, $sz) . ',0)'
+    if $null eq 'hash';
+  die "unexpected null $null";
+}
+
+sub firebird_null_template($$$) {
+  my ($null, $algo, $sz) = @_;
+  return "COALESCE(%s,'NULL')" if $null eq 'text';
+  return 'COALESCE(' . firebird_cksum_template($algo, $sz) . ',0)'
+    if $null eq 'hash';
+  die "unexpected null $null";
+}
+
+sub bb_concat($$) {
+  my ($sep, $list) = @_;
+  return join("||'$sep'||", @$list);
+}
+
+sub mysql_concat($$) {
+  my ($sep, $list) = @_;
+  return 'CONCAT(' . join(",'$sep',", @$list) . ')';
+}
+
+sub dq_unquote($) {
+  my ($str) = @_;
+  if ($str =~ /^\"(.*)\"$/) {
+    $str = $1;
+    $str =~ s/\"\"/\"/g;
+  }
+  return $str;
+}
+
+sub dq_quote($) {
+  my ($str) = @_;
+  if ($str =~ /^\"(.*)\"$/) {
+    $str = $1;
+    $str =~ s/\"\"/\"/g;
+  }
+  return $str;
+}
+
+sub mysql_unquote($) {
+  my ($str) = @_;
+  if ($str =~ /^\`(.*)\`$/) {
+    $str = $1;
+    $str =~ s/\`\`/\`/g;
+  }
+  return $str;
+}
+
+sub pgsql_tableid($) {
+  my ($table) = @_;
+  # ??? this is not really a parser as it should be...
+  die "too many '.' in table $table" if $table =~ /\..*\./;
+  $table = ".$table" if $table !~ /\./;
+  my ($s, $t) = split '\.', $table;
+  return (dq_unquote($s), dq_unquote($t));
+}
+
+sub mysql_tableid($) {
+  my ($table) = @_;
+  # no 'schema' under MySQL... well, there is one, but it is named 'database'.
+  return (undef, mysql_unquote($table));
+}
+
+sub sqlite_tableid($) {
+  my ($table) = @_;
+  return (undef, dq_unquote($table));
+}
+
+sub pgsql_get_result($) {
+  my ($dbh) = @_;
+  return $dbh->pg_result();
+}
+
+sub mysql_get_result($) {
+  my ($dbh) = @_;
+  my @res;
+  # work around the fails if there is no current async query
+  eval {
+    # hmmm... under -A we can have some
+    # "Gathering async_query_in_flight results for the wrong handle"
+    # warn "undefined query?" if not defined $dbh->mysql_async_ready();
+    @res = $dbh->mysql_async_result();
+  };
+  if ($@ and $debug) { # keep it under the carpet...
+    die "$@";
+  }
+  return @res;
+}
+
+sub sqlite_initialize($)
+{
+  my ($dbh) = @_;
+  # help integer typing
+  $dbh->{sqlite_see_if_its_a_number} = 1;
+  # database locking with begin transaction
+  # note: there must be two databases, otherwise this is a dead lock!
+  $dbh->{sqlite_use_immediate_transaction} = 1 if $do_lock;
+  # load checksum and possiby other extensions
+  if (exists $ENV{PGC_SQLITE_LOAD_EXTENSION}) {
+    $dbh->sqlite_enable_load_extension(1);
+    for my $extension (split /:/, $ENV{PGC_SQLITE_LOAD_EXTENSION}) {
+      sql_do($dbh, 'sqlite', "SELECT load_extension('$extension');");
+    }
+  }
+  if ($checksum eq 'md5') {
+    # use perl own implementation!
+    require Digest::MD5;
+    $dbh->sqlite_create_function("PGC_MD5", 2,
+      sub {
+	my ($bytes, $data) = @_;
+	my $fmt = $bytes==2? 'x14s': $bytes==4? 'x12l': 'x8q';
+	return unpack($fmt, Digest::MD5::md5($data));
+      });
+  }
+}
+
+sub firebird_initialize($)
+{
+  my ($dbh) = @_;
+  #$dbh->{AutoCommit} = 0;
+}
+
+sub amp_and($$) { return join(' & ', @_); }
+sub bin_and($$) { return 'BIN_AND(' . join(',', @_) . ')'; }
+
+sub pgsql_lock($$) {
+  my ($t, $ro) = @_; return "LOCK TABLE $t IN ACCESS EXCLUSIVE MODE";
+}
+
+sub mysql_lock($$) { # for mysql... locks are seen as a weak transaction tool
+  my ($t, $ro) = @_; return "LOCK TABLES $t " . ($ro? 'READ': 'WRITE');
+}
+
+# define all database specific "attributes" and "methods"
+# this low key OO approach avoids relying on several files
+my %M = (
+  #
+  # PostgreSQL
+  #
+  'pgsql' => {
+    # DBI driver
+    'driver' => 'DBI:pg:',
+    # DBI connection template
+    'source' => 'DBI:Pg:dbname=%b;host=%h;port=%p;',
+    # default port
+    'port' => 5432,
+    # async attributes for prepare/do
+    'attrs' => {},
+    # sql-comparison which is null-safe
+    'safeeq' => ' IS NOT DISTINCT FROM ?',
+    # sql temporary table
+    'temporary' => 'TEMPORARY ',
+    # sql drop table
+    'drop_table' => 'DROP TABLE IF EXISTS',
+    # actual aggregates to use
+    'xor' => 'XOR',
+    'sum' => 'SUM',
+    # sql-concatenate a list of stuff: concat($sep,\@list)
+   'concat' => \&bb_concat,
+    # sql lock table: lock('table name', is-read-only)
+    # for pgsql, the lock will be released at the end of the transaction
+    'lock' => \&pgsql_lock,
+    # unquote sql identifier
+    'unquote' => \&dq_unquote,
+    # quote an identifier. currently unused.
+    # ??? what about $dbh->quote_identifier?
+    'quote' => \&dq_quote,
+    # sql checksum type: cktype{cksize}
+    'cktype' => { 2 => 'INT2', 4 => 'INT4', 8 => 'INT8' },
+    # sql cast to size: cast(stuff,size)
+    'cast' => \&pgsql_cast,
+    # sql text cast prefix & suffix
+    'tcast_prefix' => '',
+    'tcast_suffix' => '::TEXT',
+    # sql text type
+    'text' => 'TEXT',
+    # whether CREATE TABLE ... AS is implemented
+    'create_as' => 1,
+    # whether CREATE TABLE ... AS returns the number of rows
+    'create_as_returns_count' => 0,
+    # whether column_info is available
+    'column_info' => 1,
+    # whether async queries are available
+    'async' => 1,
+    # whether the driver work with threads
+    'threads' => 0,
+    # sql query for column size: colsize($table, \@cols)
+    'colsize' => sub {
+      my ($table, $cols) = @_ ;
+      return "SELECT ROUND(AVG(pg_column_size(" .
+        join(')+pg_column_size(', @$cols) . ")),0) FROM $table";
+    },
+    # sql checksum for one attribute: cksum{$algo}($size, $att)
+    'ckoneatt' => {
+      'md5' => sub { my ($sz, $att) = @_;
+	return pgsql_cast(
+	  "COALESCE(DECODE(MD5(${att}::TEXT),'hex'),''::BYTEA)" .
+	  "::BIT(" .  8*$sz . ")", $sz);
+	},
+      'ck' => sub { my ($sz, $att) = @_; return "CKSUM$sz(${att}::TEXT)"; }
+    },
+    # sql checksum template: cksum($algo, $size)
+    'cksum' => \&pgsql_cksum_template,
+    # sql null template: null($null, $algo, $size)
+    'null' => \&pgsql_null_template,
+    # return unquoted (schema, table)
+    'tableid' => \&pgsql_tableid,
+    # get result from an asynchronous query: get_result($dbh)
+    'get_result' => \&pgsql_get_result,
+    # 'initialize' database handler: initialize($dbh)
+    # bitwise and operation: andop($s1,$s2)
+    'andop' => \&amp_and,
+  },
+  #
+  # MySQL
+  #
+  'mysql' => {
+    'driver' => 'DBI:mysql:',
+    'source' => 'DBI:mysql:database=%b;host=%h;port=%p;',
+    'port' => 3306,
+    'attrs' => {},
+    'safeeq' => '<=>?',
+    'temporary' => 'TEMPORARY ',
+    'drop_table' => 'DROP TABLE IF EXISTS',
+    'xor' => 'BIT_XOR',
+    'sum' => 'SUM',
+    'concat' => \&mysql_concat,
+    'lock' => \&mysql_lock,
+    'unquote' => \&mysql_unquote,
+    'quote' => sub { my ($str) = @_; $str =~ s/\`/\`\`/g; return "\`$str\`"; },
+    'cktype' => { 2 => 'INTEGER', 4 => 'INTEGER', 8 => 'BIGINT' },
+    'cast' => \&mysql_cast,
+    'tcast_prefix' => 'CAST(',
+    'tcast_suffix' => ' AS BINARY)',
+    'text' => 'TEXT',
+    'create_as' => 1,
+    'create_as_returns_count' => 1,
+    'column_info' => 1,
+    'async' => 1,
+    'threads' => 1,
+    'colsize' => sub {
+      my ($table, $cols) = @_ ;
+      warn "col_size() not well implemented for mysql";
+      return "SELECT ROUND(AVG(LENGTH(" . mysql_concat('', $cols) . ")),0) " .
+        "FROM $table";
+    },
+    'ckoneatt' => {
+      'md5' => sub { my ($sz, $att) = @_;
+        return mysql_cast(
+	  "COALESCE(CONV(LEFT(MD5($att),". 2*$sz ."),16,10),0)", $sz);
+	},
+      'ck' => sub { my ($sz, $att) = @_;
+	return "CKSUM$sz(CAST($att AS BINARY))"
+      }
+    },
+    'cksum' => \&mysql_cksum_template,
+    'null' => \&mysql_null_template,
+    'tableid' => \&mysql_tableid,
+    'get_result' => \&mysql_get_result,
+    # no 'initialize'
+    'andop' => \&amp_and,
+  },
+  #
+  # SQLite
+  #
+  'sqlite' => {
+    'driver' => 'DBI:SQLite:',
+    'source' => 'DBI:SQLite:dbname=%b',
+    # no port
+    'attrs' => {},
+    'safeeq' => '=?', # ???
+    'temporary' => 'TEMPORARY ',
+    'drop_table' => 'DROP TABLE IF EXISTS',
+    'xor' => 'XOR',
+    'sum' => 'ISUM',# work around 'SUM' and 'TOTAL' overflow handling
+    'concat' => \&bb_concat,
+    # no table 'lock', but possible database locking with the transaction
+    'unquote' => \&dq_unquote,
+    'quote' => \&dq_quote,
+    'cktype' => { 2 => 'INTEGER', 4 => 'INTEGER', 8 => 'INTEGER' },
+    'cast' => \&sqlite_cast,
+    'tcast_prefix' => 'CAST(',
+    'tcast_suffix' => ' AS TEXT)',
+    'text' => 'TEXT',
+    'create_as' => 1,
+    'create_as_returns_count' => 0,
+    'column_info' => 0,
+    'async' => 0,
+    'threads' => 0,
+    'colsize' => sub {
+      my ($table, $cols) = @_ ;
+      warn "col_size() not well implemented for sqlite";
+      return "SELECT ROUND(AVG(LENGTH(" . bb_concat('', $cols) . ")),0) " .
+        "FROM $table";
+    },
+    'ckoneatt' => {
+      'md5' => sub { my ($sz, $att) = @_;
+        return "PGC_MD5($sz, CAST($att AS TEXT))";
+	},
+      'ck' => sub { my ($sz, $att) = @_;
+        return "CKSUM$sz(CAST($att AS TEXT))";
+      }
+    },
+    'cksum' => \&sqlite_cksum_template,
+    'null' => \&sqlite_null_template,
+    'tableid' => \&sqlite_tableid,
+    # no 'get_result'
+    'initialize' => \&sqlite_initialize,
+    'andop' => \&amp_and,
+  },
+  #
+  # Firebird: this is a strange bird...
+  #
+  # - it is based on windows-oriented open-sourced Borland's InterBase.
+  # - it mixes both client-server features (host, port, user, pass) and
+  #   sqlite-like single-file storage for which you must know the path.
+  #   this seems pretty inconsistent.
+  # - <sigh>passwords are stored in plaintext</sigh>.
+  # - the documentation is only "differential" from one version to the next,
+  #   or one database to the other: I have found no consolidated reference.
+  # - the DBD driver seems buggy (see close_cursor workaround) and is missing
+  #   column_info and other metadata features that I need.
+  # - the "isql" command cannot connect from the shell, one must issue a
+  #   "CONNECT 'path';" interactively, this makes testing harder.
+  # - some features are implemented strangely: e.g. temporary tables are "global
+  #   temporary" and are not dropped, only their contents is deleted on exit.
+  # - there is no "DROP TABLE IF EXISTS ...", thus manual cleaning on errors.
+  # - there is no "CREATE TABLE ... AS SELECT ..."
+  # - typename 'BLOB SUB_TYPE TEXT'... the standard TEXT would have been nicer.
+  # - SUM() and CAST( ...) detect overflows where I wish they would not.
+  # - I found no simple way to add a new aggregate function.
+  # - the project seems on a slow development space.
+  # - the comparisons seem very slow.
+  #
+  'firebird' => {
+    'driver' => 'DBI:Firebird:',
+    'source' => 'DBI:Firebird:database=%b;host=%h;port=%p;',
+    'port' => 3060,
+    'attrs' => {},
+    'safeeq' => ' IS NOT DISTINCT FROM ?',
+    'temporary' => 'GLOBAL TEMPORARY ', # not dropped...
+    'drop_table' => 'DROP TABLE',
+    'xor' => '???',
+    'sum' => 'SUM', # ??? too clever, detects integer overflows
+    'concat' => \&bb_concat,
+    #'lock' => sub { my ($t, $ro) = @_; return "???unclear"; },
+    'unquote' => \&dq_unquote,
+    'quote' => \&dq_quote,
+    # 4 use BIGINT instead of INTEGER to avoid SUM overflows
+    'cktype' => { 2 => 'INTEGER', 4 => 'BIGINT', 8 => 'BIGINT' },
+    'cast' => \&firebird_cast,
+    'tcast_prefix' => 'CAST(',
+    'tcast_suffix' => ' AS BLOB)',
+    'text' => 'BLOB SUB_TYPE TEXT',
+    'create_as' => 0,
+    'create_as_returns_count' => 0,
+    'column_info' => 0,
+    'async' => 0,
+    'threads' => 0,
+    'colsize' => sub {
+      my ($table, $cols) = @_ ;
+      warn "col_size() not well implemented for firebird";
+      return "SELECT ROUND(AVG(LENGTH(" . bb_concat('', $cols) . ")),0) " .
+        "FROM $table";
+    },
+    # sql checksum for one attribute: cksum{$algo}($size, $att)
+    'ckoneatt' => {
+      'md5' => sub { die "MD5 not implemented with firebird"; },
+      'ck' => sub {
+	my ($sz, $att) = @_;
+	return firebird_cast("HASH($att)", $sz);
+      }
+    },
+    # sql checksum template: cksum($algo, $size)
+    'cksum' => \&firebird_cksum_template,
+    # sql null template: null($null, $algo, $size)
+    'null' => \&firebird_null_template,
+    'tableid' => \&sqlite_tableid,
+    # no 'get_result'
+    'initialize' => \&firebird_initialize,
+    'andop' => \&bin_and,
+    # work around firebird cursor issue with prepare/(execute/fetch)*
+    'close_cursor' => sub { my ($sth) = @_; $sth->fetchrow_array(); },
+  }
+);
+
 #################################################################### CONNECTION
 
 use DBI;
@@ -1324,7 +1851,10 @@ my ($dbh1, $dbh2);
 # parse a connection url
 # ($db,$u,$w,$h,$p,$b,$t,$k,$c) = parse_conn("connection-url")
 # globals: $verb
-# pgsql://calvin:secret@host:5432/base/schema.table?key:col,list
+# pgsql://calvin:secret@host:5432/base/schema.table?key:column,list
+# mysql://calvin:secret@host:3306/base/table?key:column,list
+# firebird://calvin:secret@host:3050/base_file_path/table?key:column,list
+# sqlite:///base_file_relative_path/table?key:column,list
 sub parse_conn($)
 {
   my $c = shift;
@@ -1333,8 +1863,14 @@ sub parse_conn($)
   # get driver name
   if ($c =~ /^(pg|my)(sql)?:\/\//) {
     $db = $1 . 'sql';
-    $c =~ s/^\w+:\/\///;
   }
+  elsif ($c =~ /^(sqlite|firebird):\/\//) {
+    $db = $1;
+  }
+  else {
+    die "no driver found in URL: $c";
+  }
+  $c =~ s/^\w+:\/\///;
 
   # split authority and path on first '/'
   die "invalid connection string '$c', must contain '\/'\n"
@@ -1348,7 +1884,7 @@ sub parse_conn($)
     die "invalid authority string '$auth'\n"
       unless $auth =~ /^((\w+)         # login
 			 (:([^.]*)     # :password
-			 )?\@)?        # @
+			  )?\@)?       # @
 		       ([^\@:\/]*)     # host
 		       (:(\d+))?$      # :port
 		      /x;
@@ -1357,28 +1893,45 @@ sub parse_conn($)
     $pass=$4 if defined $3;
     $host=$5; # may be empty, but must be defined!
     $port=$7 if defined $6;
-    verb 3, "user=$user pass=$pass host=$host port=$port" if $debug;
+    verb 3, "user=$user pass=$pass host=$host port=" . defined $port? $port: '?'
+      if $debug;
   }
 
   if ("$path")
   {
-    # parse path base/schema.table?key,part:column,list,part
-    # accept postgresql (") and mysql (`) name quotes in table.
-    # ??? this would need a real lexer?
-    die "invalid path string '$path'\n"
-      unless $path =~ /
-        ^(\w+)?                                   # base
-         (\/((\w+\.|\"[^\"]+\"\.|\`[^\`]+\`\.)?   # schema.
-         (\w+|\"[^\"]+\"|\`[^\`]+\`)))?           # table
-         (\?(.+))?                                # key,part:column,list...
-      /x;
+    my $kc_str;
 
-    $base=$1 if defined $1;
-    $tabl=$3 if defined $2;
+    if ($db eq 'sqlite' or $db eq 'firebird') {
+      # note: there may be "/" in the base file path...
+      # if so, the last "/" is mandatory to mark the table name
+      die "invalid path string '$path'\n"
+        unless $path =~ /
+	  ^((.*)                    # base file path
+	    \/(\w+|\"[^\"+]\")?)?   # table
+	  (\?(.+))?                 # key,part:column,list...
+	/x;
+      $base = $2 if defined $2;
+      $tabl = $3 if defined $3;
+      $kc_str = $5 if defined $5;
+    }
+    else { # pgsql & mysql
+      # parse path base/schema.table?key,part:column,list,part
+      # note that it may be empty when using implicit defaults
+      # accept postgresql (") and mysql (`) name quotes in table.
+      die "invalid path string '$path'\n"
+        unless $path =~ /
+          ^(\w+)?                                   # base
+           (\/((\w+\.|\"[^\"]+\"\.|\`[^\`]+\`\.)?   # schema.
+               (\w+|\"[^\"]+\"|\`[^\`]+\`)))?       # table
+           (\?(.+))?                                # key,part:column,list...
+        /x;
+      $base=$1 if defined $1;
+      $tabl=$3 if defined $2;
+      $kc_str = $7 if defined $7;
+    }
 
-    if (defined $7)
+    if (defined $kc_str)
     {
-      my $kc_str = $7;
       my $in_cols = 0;
       my ($k, $c, @k, @c);
       while ($kc_str =~
@@ -1398,7 +1951,7 @@ sub parse_conn($)
 	$in_cols=1 if $4 eq ':';
       }
       $keys = [@k] if $k;
-      $cols = [@c] if $c;
+      $cols = [@c] if $in_cols;
     }
   }
 
@@ -1406,16 +1959,6 @@ sub parse_conn($)
   my @res = ($db, $user, $pass, $host, $port, $base, $tabl, $keys, $cols);
   verb 2, "connection parameters: @res" if $debug;
   return @res;
-}
-
-# return the dbi driver name depending on the database
-# no-op if not threaded.
-sub driver($)
-{
-  my ($db) = @_;
-  return 'DBI:Pg:' if $db eq 'pgsql';
-  return 'DBI:mysql:' if $db eq 'mysql';
-  die "unexpected db ($db)";
 }
 
 # store: dbh -> current asynchronous query
@@ -1430,23 +1973,7 @@ sub async_wait($$$)
   return if not exists $current_async_query{$dbh};
   verb 5, "async_wait $db $from: $current_async_query{$dbh}";
   verb 6, "dbh is $dbh" if $debug;
-  my @res;
-  if ($db eq 'pgsql') {
-    @res = $dbh->pg_result();
-  }
-  elsif ($db eq 'mysql') {
-    # but not so mysql
-    # work around the fails if there is no current async query
-    eval {
-      # hmmm... under -A we can have some
-      # "Gathering async_query_in_flight results for the wrong handle"
-      # warn "undefined query?" if not defined $dbh->mysql_async_ready();
-      @res = $dbh->mysql_async_result();
-    };
-    if ($@ and $debug) { # keep it under the carpet...
-      die "$@";
-    }
-  }
+  my @res = &{$M{$db}{get_result}}($dbh);
   delete $current_async_query{$dbh};
   return @res;
 }
@@ -1473,24 +2000,10 @@ sub dbh_materialize($$)
   my ($dbh, $db) = @_;
   if ($threads) {
     verb 5, "materializing db=$db";
-    $_[0] = DBI->connect(driver($db), undef, undef, { 'dbi_imp_data' => $dbh })
+    $_[0] = DBI->connect($M{$db}{driver}, undef, undef,
+			 { 'dbi_imp_data' => $dbh })
 	or die $DBI::errstr;
   }
-}
-
-# return DBI connection template for database
-# this may be overwritten with the --source[12] options
-sub source_template($)
-{
-  my ($db) = @_;
-  if ($db eq 'pgsql') {
-    return 'DBI:Pg:dbname=%b;host=%h;port=%p;';
-  }
-  elsif ($db eq 'mysql') {
-    return 'DBI:mysql:database=%b;host=%h;port=%p;';
-  }
-  # else
-  die "unexpected db ($db)";
 }
 
 # global counters for the report
@@ -1500,9 +2013,6 @@ my $query_fr = 0;   # fetched summary rows
 my $query_fr0 = 0;  # fetched checksum rows
 my $query_data = 0; # fetched data rows for synchronizing
 my $query_meta = 0; # special queries to metadata
-
-# async attributes for prepare/do
-my %attrs = ( 'pgsql' => {}, 'mysql' => {});
 
 # sql_do($dbh, $query)
 # execute an SQL query on a database
@@ -1517,7 +2027,7 @@ sub sql_do($$$)
   # not needed for postgresql which will wait automatically
   async_wait($dbh, $db, 'sql_do') if $async; # and $db eq 'mysql';
   $current_async_query{$dbh} = $query; # keep track of current query
-  return $dbh->do($query, $attrs{$db});
+  return $dbh->do($query, $M{$db}{attrs});
 }
 
 # execute a parametric statement with col & key values
@@ -1525,6 +2035,7 @@ sub sth_param_exec($$$$@)
 {
   my ($doit, $what, $sth, $keys, @cols) = @_;
   my $index = 1;
+  verb 6, "executing $what";
   # ??? $sth->execute(@cols, @$keys);
   for my $val (@cols, @{$keys}) {
     $sth->bind_param($index++, $val) if $doit;
@@ -1537,46 +2048,47 @@ sub sth_param_exec($$$$@)
 sub conn($$$$$$$$$)
 {
   my ($db, $b, $h, $p, $u, $w, $src, $table, $ro) = @_;
+
+  # prepare dbi source
   my $s;
   if (not defined $src) {
     # derive data source specification from URL
-    $s = source_template($db);
+    $s = $M{$db}{source};
     $s =~ s/\%b/$b/g; # database
-    $s =~ s/\%h/$h/g; # host
-    $s =~ s/host=;// if $h eq ''; # cleanup if host is unused...
-    $s =~ s/\%p/$p/g; # port
-    $s =~ s/\%u/$u/g; # user (not used)
+    $s =~ s/\%h/$h/g if defined $h; # host
+    $s =~ s/host=;// if not defined $h or $h eq ''; # cleanup if unused host.
+    $s =~ s/\%p/$p/g if defined $p; # port
+    $s =~ s/\%u/$u/g if defined $u; # user (not used)
   }
   else {
     verb 2, "overriding DBI data source specification with: $src";
     $s = $src;
   }
+
+  # actual connection
   verb 3, "connecting to s=$s u=$u";
   my $dbh = DBI->connect($s, $u, $w,
 		{ RaiseError => 1, PrintError => 0, AutoCommit => 1 })
       or die $DBI::errstr;
+  verb 4, "connected to $u\@$h:$p/$b";
+
   # multiple --debug leads to DBI tracing levels
   $dbh->trace($debug-1) if $debug>1;
-  verb 4, "connected to $u\@$h:$p/$b";
+
+  &{$M{$db}{initialize}}($dbh) if exists $M{$db}{initialize};
+
+  # handle transaction
   if ($do_trans) {
     # start a big transaction...
     $dbh->begin_work or die $dbh->errstr;
   }
-  # handle locking...
-  if ($do_lock) {
+
+  # handle explicit table locking
+  if ($do_lock and exists $M{$db}{lock}) {
     verb 2, "locking $table";
-    if ($db eq 'pgsql') {
-      # for pgsql, the lock will be released at the end of the transaction
-      sql_do($dbh, $db, "LOCK TABLE $table IN ACCESS EXCLUSIVE MODE");
-    }
-    elsif ($db eq 'mysql') {
-      # for mysql, sigh... locks are seen as a weak transaction tool
-      sql_do($dbh, $db, "LOCK TABLES $table " . ($ro? 'READ': 'WRITE'));
-    }
-    else {
-      die "unexpected db $db";
-    }
+    sql_do($dbh, $db, &{$M{$db}{lock}}($table, $ro));
   }
+
   return $dbh;
 }
 
@@ -1594,7 +2106,7 @@ sub build_conn($$$$$$$$$)
   return $dbh;
 }
 
-###################################################################### DB UTILS
+############################################################## DATABASE QUERIES
 
 # build cols=? sql-expression
 sub is_equal($$$$)
@@ -1608,75 +2120,10 @@ sub is_equal($$$$)
       $expr .= '=?';
     }
     else {
-      $expr .= ($db eq 'pgsql'? ' IS NOT DISTINCT FROM ?': '<=>?');
+      $expr .= $M{$db}{safeeq};
     }
   }
   return $expr;
-}
-
-# unquote an identifier
-sub db_unquote($$)
-{
-  my ($db, $str) = @_;
-  if ($db eq 'pgsql') {
-    if ($str =~ /^\"(.*)\"$/) {
-      $str = $1;
-      $str =~ s/\"\"/\"/g;
-    }
-  }
-  elsif ($db eq 'mysql') {
-    if ($str =~ /^\`(.*)\`$/) {
-      $str = $1;
-      $str =~ s/\`\`/\`/g;
-    }
-  }
-  else {
-    die "unexpected db $db";
-  }
-  return $str;
-}
-
-# quote an identifier. currently unused.
-# ??? what about $dbh->quote_identifier?
-sub db_quote($$)
-{
-  my ($db, $str) = @_;
-  if ($db eq 'pgsql') {
-    $str =~ s/\"/\"\"/g;
-    return "\"$str\"";
-  }
-  elsif ($db eq 'mysql') {
-    $str =~ s/\`/\`\`/g;
-    return "\`$str\`"
-  }
-  die "unexpected db $db";
-}
-
-####################################################################### QUERIES
-
-# return unquoted (schema, table)
-sub table_id($$)
-{
-  my ($db, $table) = @_;
-  if ($db eq 'pgsql') {
-    # ??? this is not really a parser as it should be...
-    die "too many '.' in table $table" if $table =~ /\..*\./;
-    if ($table =~ /\./) {
-      my ($s, $t) = split '\.', $table;
-      return (db_unquote($db, $s), db_unquote($db, $t));
-    }
-    else {
-      $table = db_unquote($db, $table);
-      return ('', $table);
-    }
-  }
-  elsif ($db eq 'mysql')
-  {
-    $table = db_unquote($db, $table);
-    # no 'schema' under MySQL... well, there is one, but it is named 'database'.
-    return (undef, $table) if $db eq 'mysql';
-  }
-  die "unexpected db $db";
 }
 
 # get all attribute names, possibly ignoring a set of columns
@@ -1686,7 +2133,7 @@ sub get_table_attributes($$$$@)
   dbh_materialize($dbh, $db);
   $query_meta++;
   async_wait($dbh, $db, 'attributes') if $async;
-  my $sth = $dbh->column_info($base, table_id($db, $table), '%');
+  my $sth = $dbh->column_info($base, &{$M{$db}{tableid}}($table), '%');
   my ($row, %cols);
   while ($row = $sth->fetchrow_hashref()) {
     $cols{$$row{COLUMN_NAME}} = 1;
@@ -1706,7 +2153,7 @@ sub get_table_pkey($$$$)
   dbh_materialize($dbh, $db);
   $query_meta++;
   async_wait($dbh, $db, 'pkey') if $async;
-  my @keys = $dbh->primary_key($base, table_id($db, $table));
+  my @keys = $dbh->primary_key($base, &{$M{$db}{tableid}}($table));
   dbh_serialize($dbh, $db);
   return @keys;
 }
@@ -1718,6 +2165,7 @@ sub get_column_info($$$)
 {
   my ($dbh, $dhpbt, $col) = @_;
   my ($db, $base, $table) = (split /:/, $dhpbt)[0,3,4];
+  return undef unless $M{$db}{column_info};
   if (not exists $column_info{"$dhpbt/$col"})
   {
     # else try to get it
@@ -1726,7 +2174,8 @@ sub get_column_info($$$)
     async_wait($dbh, $db, 'column info') if $async;
     verb 6, "column_info: $db $base $table $col" if $debug;
     my $sth =
-      $dbh->column_info($base, table_id($db, $table), db_unquote($db, $col));
+      $dbh->column_info($base, &{$M{$db}{tableid}}($table),
+			&{$M{$db}{unquote}}($col));
     die "column_info not implemented by driver" unless defined $sth;
     my $h = $sth->fetchrow_hashref();
     die "column information not returned" unless defined $h;
@@ -1742,12 +2191,16 @@ sub col_is_not_null($$$)
   my ($dbh, $dhpbt, $col) = @_;
   my $h = get_column_info($dbh, $dhpbt, $col);
   my $notnull = 0; # default is to assume that it is nullable
-  if (defined ${$h}{NULLABLE}) {
+  if (not defined $h) {
+    $notnull = 0;
+  }
+  elsif (defined ${$h}{NULLABLE}) {
     $notnull = ${$h}{NULLABLE}==0;
   }
   elsif (defined ${$h}{IS_NULLABLE}) {
     $notnull = ${$h}{IS_NULLABLE} eq 'NO';
   }
+  # else default is 0
   verb 6, "not null for $dhpbt:$col is $notnull" if $debug;
   return $notnull;
 }
@@ -1756,12 +2209,16 @@ sub col_is_not_null($$$)
 sub col_type($$$$)
 {
   my ($dbh, $dhpbt, $db, $col) = @_;
+  # sqlite and firebird do not implement column_info
+  # ??? hmmm... should it be text or int? it depends.
+  return $M{$db}{cktype}{4} unless $M{$db}{column_info};
+  #return $M{$db}{text} unless $M{$db}{column_info};
+  # mysql & pgsql
   my $h = get_column_info($dbh, $dhpbt, $col);
   die 'column type not found' unless defined ${$h}{TYPE_NAME};
-  if ($db eq 'pgsql') {
-    return ${$h}{pg_type};
-  }
-  # else 'mysql'
+  # pgsql
+  return ${$h}{pg_type} if $db eq 'pgsql';
+  # mysql
   my $type = ${$h}{TYPE_NAME};
   # ??? workaround the full type name...
   $type .= '(' . ${$h}{COLUMN_SIZE} . ')';
@@ -1780,8 +2237,7 @@ sub count($$$$)
   async_wait($dbh, $db, 'count') if $async;
   verb 3, "$query_nb\t$query";
   $current_async_query{$dbh} = $query;
-  #print STDERR "attrs $db: ", %{$attrs{$db}}, "\n";
-  my $sth = $dbh->prepare($query, $attrs{$db}) or die $dbh->errstr;
+  my $sth = $dbh->prepare($query, $M{$db}{attrs}) or die $dbh->errstr;
   $sth->execute() or die $dbh->errstr;
   return $sth;
 }
@@ -1791,23 +2247,8 @@ sub count($$$$)
 sub col_size($$$$)
 {
   my ($dbh, $db, $table, $cols) = @_;
-  my $q;
   return (0) unless $cols and @$cols;
-  if ($db eq 'pgsql')
-  {
-    $q = "SELECT ROUND(AVG(pg_column_size(" .
-       join(')+pg_column_size(', @$cols) . ")),0) FROM $table";
-  }
-  elsif ($db eq 'mysql')
-  {
-    # the functionnality is missing in mysql
-    warn "col_size() not well implemented for $db";
-    $q = "SELECT ROUND(AVG(LENGTH(" . concat($db, '', $cols) . ")),0) " .
-	  "FROM $table";
-  }
-  else {
-    die "unexpected db ($db)";
-  }
+  my $q = &{$M{$db}{colsize}}($table, $cols);
   verb 4, "col_size query: $q";
   async_wait($dbh, $db, 'col_size') if $async;
   return $dbh->selectrow_array($q);
@@ -1837,135 +2278,20 @@ sub subs_null($$$$)
   return [@l];
 }
 
-# returns an sql concatenation of fields
-# $sql = concat($db, $sep, $ref_to_list_of_attributes)
-sub concat($$$)
-{
-  my ($db, $sep, $list) = @_;
-  if ($db eq 'pgsql') {
-    return join("||'$sep'||", @$list);
-  }
-  elsif ($db eq 'mysql') {
-    return 'CONCAT(' . join(",'$sep',", @$list) . ')';
-  }
-  die "unexpected db ($db)";
-}
-
-# return template
-sub null_template($$$$)
-{
-  my ($db, $null, $algo, $sz) = @_;
-  if ($db eq 'pgsql') {
-    if ($null eq 'text') {
-      return "COALESCE(%s::TEXT,'NULL')"
-    }
-    elsif ($null eq 'hash') {
-      return 'COALESCE(' . cksm_template($db, $algo, $sz) . ',0)'
-    }
-    die "unexpected null $null";
-  }
-  elsif ($db eq 'mysql') {
-    if ($null eq 'text') {
-      return "COALESCE(CAST(%s AS BINARY),'NULL')"
-    }
-    elsif ($null eq 'hash') {
-      return 'COALESCE(' . cksm_template($db, $algo, $sz) . ',0)'
-    }
-    die "unexpected null $null";
-  }
-  die "unexpected db ($db)";
-}
-
-# get checksum type for a db & size
-sub checksum_type($$)
-{
-  my ($db, $sz) = @_;
-  return "INT$sz" if $db eq 'pgsql';
-  # hmmm... mysql does not have ints of all sizes
-  return $sz==8? 'BIGINT': 'INTEGER' if $db eq 'mysql';
-  die "unexpected database $db";
-}
-
-# generate a "cast" targetting a size in bytes for db
-sub cast_size($$$)
-{
-  my ($db, $s, $sz) = @_;
-  if ($db eq 'pgsql') {
-    return "${s}::INT$sz";
-  }
-  elsif ($db eq 'mysql') {
-    # MySQL casts are a joke, you cannot really select any target type.
-    # so I reimplemented that in a function which returns a BIGINT whatever...
-    return "biginttoint$sz(CAST($s AS SIGNED))";
-  }
-  die "unexpected db ($db)";
-}
-
-# return checksum template for a non-NULL string.
-sub cksm_template($$$)
-{
-  my ($db, $algo, $sz) = @_;
-  if ($db eq 'pgsql') {
-    if ($algo eq 'md5') {
-      return cast_size($db,
-		       "DECODE(MD5(%s::TEXT),'hex')::BIT(" . 8*$sz . ")", $sz);
-    }
-    elsif ($algo eq 'ck') {
-      return "CKSUM$sz((%s)::TEXT)";
-    }
-    die "unexpected algo $algo";
-  }
-  elsif ($db eq 'mysql') {
-    if ($algo eq 'md5') {
-      return cast_size($db, "CONV(LEFT(MD5(%s),". 2*$sz ."),16,10)", $sz);
-    }
-    elsif ($algo eq 'ck') {
-      return "CKSUM$sz(CAST(%s AS BINARY))";
-    }
-    die "unexpected algo $algo";
-  }
-  die "unexpected database ($db)";
-}
-
 # checksum/hash one or more attributes
 sub ckatts($$$$)
 {
   my ($db, $algo, $sz, $atts) = @_;
-  if ($db eq 'pgsql') {
-    if (@$atts > 1) {
-      return join '', subs(cksm_template($db, $algo, $sz),
-			   concat($db, $sep, $atts));
-    }
-    else {
-      # simpler version when there is only one attribute...
-      if ($algo eq 'md5') {
-	return cast_size($db,
-		   "COALESCE(DECODE(MD5($$atts[0]::TEXT),'hex'),''::BYTEA)" .
-			 "::BIT(" .  8*$sz . ")", $sz);
-      }
-      else { # $algo eq 'ck'
-	return "CKSUM$sz($$atts[0]::TEXT)";
-      }
-    }
+  die "expecting at least one attribute" unless @$atts;
+  if (@$atts > 1) {
+    # several attributes
+    return join '', subs(&{$M{$db}{cksum}}($algo, $sz),
+			 &{$M{$db}{concat}}($sep, $atts));
   }
-  elsif ($db eq 'mysql') {
-    if (@$atts > 1) {
-      return join '', subs(cksm_template($db, $algo, $sz),
-			   concat($db, $sep, $atts));
-    }
-    else {
-      # simpler version when there is only one attribute...
-      if ($algo eq 'md5') {
-	return cast_size($db,
-	      "COALESCE(CONV(LEFT(MD5($$atts[0]),". 2*$sz ."),16,10),0)", $sz);
-      }
-      else { # $algo eq 'ck'
-	return "CKSUM$sz(CAST($$atts[0] AS BINARY))";
-      }
-    }
+  else {
+    # checksum one attribute
+    return &{$M{$db}{ckoneatt}{$algo}}($sz, $$atts[0]);
   }
-  # else
-  die "not implemented yet for db $db";
 }
 
 # generate variant of the list of pk<n>
@@ -1980,12 +2306,11 @@ sub key_pk_get($$$$$)
     unless $castatt or $cast or $as or $decl or $args;
   for my $att (@$keys) {
     $res .= ', ' if $res;
-    $res .= 'CAST(' if $db eq 'mysql' and ($cast or $castatt);
+    $res .= $M{$db}{tcast_prefix} if $cast or $castatt;
     $res .= "$att" if $castatt or $as;
     $res .= ' AS ' if $as;
     $res .= "pk$i" unless $castatt;
-    $res .= ' AS BINARY)' if $db eq 'mysql' and ($cast or $castatt);
-    $res .= '::TEXT' if $db eq 'pgsql' and ($cast or $castatt);
+    $res .= $M{$db}{tcast_suffix} if $cast or $castatt;
     $res .= ' ' . col_type($dbh, $dhpbt, $db, $att) if $decl;
     $i++;
   }
@@ -2000,7 +2325,7 @@ sub build_cs_table($$$$$$$$)
 {
   my ($dbh, $dhpbt, $db, $table, $keys, $pkeys, $cols, $name) = @_;
   verb 2, "building checksum table ${name}0";
-  sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}0") if $cleanup;
+  sql_do($dbh, $db, "$M{$db}{drop_table} ${name}0") if $cleanup;
 
   # CREATE AS vs INSERT SELECT to get row count & choose types.
   my $build_checksum =
@@ -2022,23 +2347,25 @@ sub build_cs_table($$$$$$$$)
   # what would be the impact on the cksum? on pg/my compatibility?
 
   my $count = -1;
-  if ($ckcmp eq 'create')
+  if ($ckcmp eq 'create' and $M{$db}{create_as})
   {
     $count =
-      sql_do($dbh, $db, "CREATE ${temp}TABLE ${name}0 AS $build_checksum");
+      sql_do($dbh, $db,
+	     "CREATE " . ($temp? $M{$db}{temporary}:'') .
+	     "TABLE ${name}0 AS $build_checksum");
     # count should be available somewhere,
     # but alas does not seem to be returned by do("CREATE TABLE ... AS ... ")
     # by pgsql, although it is returned by mysql
   }
-  elsif ($ckcmp eq 'insert')
+  elsif ($ckcmp eq 'insert' or not $M{$db}{create_as})
   {
     sql_do($dbh, $db,
-	   "CREATE ${temp}TABLE ${name}0 (" .
+	   "CREATE ". ($temp? $M{$db}{temporary}: '')."TABLE ${name}0 (".
 	   # KEY CHECKSUM NN?
 	   'kcs ' .
-       ($usekey? col_type($dbh, $dhpbt, $db, "@$pkeys"): checksum_type($db, 4)).
+       ($usekey? col_type($dbh, $dhpbt, $db, "@$pkeys"): $M{$db}{cktype}{4}) .
 	   # TUPLE CHECKSUM NN?
-	   ' NOT NULL, tcs ' . checksum_type($db, $checksize) . ' NOT NULL' .
+	   ' NOT NULL, tcs ' . $M{$db}{cktype}{$checksize} . ' NOT NULL' .
 	   # KEY...
 	   ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'DECL')) .
 	   ");");
@@ -2060,7 +2387,8 @@ sub start_count($$$$)
 {
   my ($dbh, $dhpbt, $db, $table) = @_;
   # not needed for mysql, as CREATE TABLE AS returns the created table size
-  return count($dbh, $db, $table, '') if $ckcmp eq 'create' and $db eq 'pgsql';
+  return count($dbh, $db, $table, '')
+    if $ckcmp eq 'create' and not $M{$db}{create_as_returns_count};
 }
 
 # get the row count
@@ -2071,7 +2399,7 @@ sub get_count($$$$$)
   my ($dbh, $dhpbt, $db, $sth, $count) = @_;
   if ($ckcmp eq 'create') { # get the current count
     ($count) = async_wait($dbh, $db, 'count create async') if $async;
-    if ($db eq 'pgsql') {
+    unless ($M{$db}{create_as_returns_count}) {
       ($count) = $sth->fetchrow_array();
       $sth->finish();
     }
@@ -2102,15 +2430,6 @@ sub compute_checksum($$$$$$$$$)
   return $count;
 }
 
-# return actual aggregate function from aggregate name
-sub aggregate($$)
-{
-  my ($db, $agg) = @_;
-  return 'bit_xor' if $db eq 'mysql' and $agg eq 'xor';
-  # else other cases
-  return $agg;
-}
-
 # compute a summary for a given level
 # assumes that dbh is materialized...
 sub compute_summary($$$$$$@)
@@ -2118,7 +2437,7 @@ sub compute_summary($$$$$$@)
   my ($dbh, $db, $name, $table, $skey, $level, @masks) = @_;
   die "level must be positive, got $level" unless $level>0;
   verb 2, "building summary for ${table}: ${name}$level ($masks[$level])";
-  sql_do($dbh, $db, "DROP TABLE IF EXISTS ${name}${level}") if $cleanup;
+  sql_do($dbh, $db, "$M{$db}{drop_table} ${name}${level}") if $cleanup;
   # from table and attributes
   my ($kcs, $tcs, $from) = ('kcs', 'tcs', ${name} . ($level-1));
   if (defined $tup_cs and $level==1)
@@ -2128,13 +2447,25 @@ sub compute_summary($$$$$$@)
     $kcs = "@$skey" if $usekey; # must be simple!
     $from = $table;
   }
-  sql_do($dbh, $db,
-	 "CREATE ${temp}TABLE ${name}${level} AS " .
-	 # the "& mask" is really a modulo operation
-	 "SELECT ${kcs} & $masks[$level] AS kcs, " .
-	 aggregate($db, $agg) . "(${tcs}) AS tcs " .
-	 "FROM ${from} " .
-	 "GROUP BY ${kcs} & $masks[$level]");
+  # create summary table
+  my $create_table =
+    "CREATE " . ($temp? $M{$db}{temporary}:'') . "TABLE ${name}${level}";
+  # summary table contents
+  my $select = "SELECT " .
+                 &{$M{$db}{andop}}($kcs, $masks[$level]) . " AS kcs, " .
+                  $M{$db}{$agg} . "(${tcs}) AS tcs " .
+	       "FROM ${from} " .
+	       # the "& mask" is really a modulo operation
+	       "GROUP BY " . &{$M{$db}{andop}}(${kcs}, $masks[$level]);
+  if ($M{$db}{create_as}) {
+    sql_do($dbh, $db, "$create_table AS $select");
+  }
+  else { # create + insert
+    sql_do($dbh, $db,
+	   "$create_table(kcs $M{$db}{cktype}{4}, " .
+	                 "tcs $M{$db}{cktype}{$checksize})");
+    sql_do($dbh, $db, "INSERT INTO ${name}${level}(kcs,tcs) $select");
+  }
 }
 
 # compute_summaries($dbh, $name, @masks)
@@ -2170,14 +2501,15 @@ sub selkcs($$$$$@)
 	 ', ' . key_pk_get(0, 0, $db, $skey, $tup_cs? 'AS': 'LIST'): '') .
       " FROM $table ";
   # the "& mask" is really a modulo operation
-  $query .= "WHERE $kcs & $mask IN (" . join(',', @kcs) . ') ' if @kcs;
+  $query .= "WHERE " . &{$M{$db}{andop}}($kcs, $mask) .
+                   " IN (" . join(',', @kcs) . ') ' if @kcs;
   $query .= "ORDER BY $kcs";
   $query .= ', ' . key_pk_get(0, 0, $db, $skey, $tup_cs? 'CASTATT': 'CAST')
     if $get_key and not $usekey;
   # keep trac of running query
   verb 3, "$query_nb\t$query";
   $current_async_query{$dbh} = $query;
-  my $sth = $dbh->prepare($query, $attrs{$db}) or die $dbh->errstr;
+  my $sth = $dbh->prepare($query, $M{$db}{attrs}) or die $dbh->errstr;
   $query_nb++;
   $query_sz += length($query);
   $sth->execute();
@@ -2201,7 +2533,7 @@ sub get_bulk_keys($$$$$@)
   for my $kcs_mask (@kcs_masks) {
     my ($kcs,$mask) = split '/', $kcs_mask;
     $cond .= ' OR ' if $cond;
-    $cond .= "$kcs_att & $mask = $kcs";
+    $cond .= &{$M{$db}{andop}}($kcs_att, $mask) . " = $kcs";
   }
   $cond = "($where) AND ($cond)" if defined $tup_cs and $where;
   my $count = 0;
@@ -2234,6 +2566,19 @@ sub table_cleanup($$$$)
     sql_do($dbh, $db, "DROP TABLE ${name}$i");
   }
   dbh_serialize($dbh, $db); # async_wait if needed
+}
+
+# compare list items
+sub list_cmp(\@\@)
+{
+  my ($l1, $l2) = @_;
+  verb 6, "comparing @{$l1} and @{$l2}\n" if $debug;
+  die "list length must match" unless @{$l1} == @{$l2};
+  for my $i (0 .. $#{$l1}) {
+    my $cmp = $$l1[$i] cmp $$l2[$i];
+    return $cmp if $cmp != 0;
+  }
+  return 0; # all list items are equal
 }
 
 ############################################################### MERGE ALGORITHM
@@ -2305,14 +2650,14 @@ sub differences($$$$$$$$$$@)
       }
       # nothing left on both side, merge is complete
       last unless defined $kcs1 or defined $kcs2;
-      #debug: verb 6, "merging: @r1 / @r2" if $verb>=6;
+      verb 6, "merging: $kcs1,$tcs1,@key1 / $kcs2,$tcs2,@key2" if $debug;
       # else at least one of the list contains something
       if (# we are dealing with two tuples
 	  defined $kcs1 and defined $kcs2 and
 	  # their key checksums are equal
 	  $kcs1==$kcs2 and
 	  # for level 0, the keys are also equal
-	  ($level or @key1 eq @key2))
+	  ($level or list_cmp(@key1,@key2)==0))
       {
 	die "unexpected undefined tuple checksum" # if not null is wrong...
 	  unless defined $tcs1 and defined $tcs2;
@@ -2337,7 +2682,7 @@ sub differences($$$$$$$$$$@)
 	     # or the left side id checksum is less than right side
 	     (defined $kcs1 and ($kcs1<$kcs2 or
 	       # or special case for level 0 on kcs collision
-	       (not $level and $kcs1==$kcs2 and @key1 lt @key2))))
+	       (not $level and $kcs1==$kcs2 and list_cmp(@key1,@key2)<0))))
       {
 	# more kcs (/key) in table 1
 	if ($level) {
@@ -2357,7 +2702,7 @@ sub differences($$$$$$$$$$@)
 	     # or the right side id checksum is less than left side
 	     (defined $kcs2 and ($kcs1>$kcs2 or
 	       # special case for level 0 on kcs collision
-	       (not $level and $kcs1==$kcs2 and @key1 gt @key2))))
+	       (not $level and $kcs1==$kcs2 and list_cmp(@key1,@key2)>0))))
       {
 	# more kcs in table 2
 	if ($level) {
@@ -2448,6 +2793,7 @@ GetOptions(
   "synchronize|sync|S!" => \$synchronize,
   "do-it|do|D!" => \$do_it,
   "expect|e=i" => \$expect,
+  "expect-warn" => \$expect_warn, # hidden option used by the validation
   "report|r!" => \$report,
   # parallelism
   "asynchronous|A!" => \$async,
@@ -2463,7 +2809,8 @@ GetOptions(
 ) or die "$! (try $0 --help)";
 
 # propagate expect specification
-$max_report = $expect if defined $expect and not defined $max_report;
+$max_report = $expect
+  if defined $expect and not $expect_warn and not defined $max_report;
 
 # set default locking if not set
 $do_lock = $synchronize if not defined $do_lock;
@@ -2485,21 +2832,6 @@ die "data source 1 must be a DBI connection string: $source1"
 die "data source 2 must be a DBI connection string: $source2"
   if defined $source2 and $source2 !~ /^dbi:/i;
 
-# fix default options when using threads...
-if ($threads and not $debug)
-{
-  my $changed = 0;
-  # it seems that statements are closed when playing with threads
-  # so we cannot use transactions.
-  $do_trans = 0, $changed++ unless $do_trans==0;
-  #warn "WARNING $changed options fixed for threads..." if $changed;
-  warn "WARNING option '--transaction' disabled for threads..." if $changed;
-  # note: do_lock & temp==0 seems a bad idea.
-}
-
-# fix --temp or --no-temp option
-$temp = $temp? 'TEMPORARY ': '';
-
 # fix factor size
 $factor = 1 if $factor<1;
 $factor = 30 if $factor>30;
@@ -2514,12 +2846,14 @@ usage(0, 0, 'expecting 2 arguments') unless @ARGV == 2;
 # first connection
 my ($db1, $u1, $w1, $h1, $p1, $b1, $t1, $k1, $c1) = parse_conn(shift);
 
+die "unexpected auth in first URI under sqlite"
+  if $db1 eq 'sqlite' and (defined $u1 or defined $h1 or defined $p1);
+
 # set defaults and check minimum definitions.
 $db1 = 'pgsql' unless defined $db1;
 $u1 = $ENV{USER} unless defined $u1;
 $h1 = 'localhost' unless defined $h1;
-$p1 = 5432 if not defined $p1 and $db1 eq 'pgsql';
-$p1 = 3306 if not defined $p1 and $db1 eq 'mysql';
+$p1 = $M{$db1}{port} if not defined $p1 and exists $M{$db1}{port};
 
 # these are necessary
 die "no base on first connection" unless defined $b1 or defined $source1;
@@ -2528,30 +2862,16 @@ die "no table on first connection" unless defined $t1 or defined $source1;
 # second connection
 my ($db2, $u2, $w2, $h2, $p2, $b2, $t2, $k2, $c2) = parse_conn(shift);
 
+die "unexpected auth in second URI under sqlite"
+  if $db2 eq 'sqlite' and (defined $u2 or defined $h2 or defined $p2);
+
 # fix some default values for connection 2
 $db2 = $db1 unless defined $db2;
 $u2 = $u1 unless defined $u2;
 $h2 = 'localhost' unless defined $h2;
-$p2 = 5432 if not defined $p2 and $db2 eq 'pgsql';
-$p2 = 3306 if not defined $p2 and $db2 eq 'mysql';
+$p2 = $M{$db2}{port} if not defined $p2 and exists $M{$db2}{port};
 $b2 = $b1 unless defined $b2;
 $t2 = $t1 unless defined $t2;
-
-# set needed attributes for asynchronous queries
-if ($async)
-{
-  if ($db1 eq 'pgsql' or $db2 eq 'pgsql')
-  {
-    use DBD::Pg qw(:async); # just for 1 & 4 constants
-    $attrs{pgsql} = { pg_async => PG_ASYNC + PG_OLDQUERY_WAIT };
-  }
-  if ($db1 eq 'mysql' or $db2 eq 'mysql')
-  {
-    # alas, mysql lacks the nice lazyness of PG_OLDQUERY_WAIT,
-    # so I have to always try to wait before a prepare/do
-    $attrs{mysql} = { async => 1 };
-  }
-}
 
 die "null should be 'text' or 'hash', got $null"
   unless $null =~ /^(text|hash)$/i;
@@ -2577,7 +2897,11 @@ if ($ask_pass and not defined $w1)
   $w1 = Term::ReadPassword::read_password('connection 1 password> ');
 }
 
-$w2 = $w1 unless $w2 or not $w1 or $u1 ne $u2 or $h1 ne $h2 or $p1!=$p2;
+# post cleanup
+($h1, $p1, $u1, $w1) = ('', '', '', '') if $db1 eq 'sqlite';
+($h2, $p2, $u2, $w2) = ('', '', '', '') if $db2 eq 'sqlite';
+
+$w2 = $w1 unless $w2 or not $w1 or $u1 ne $u2 or $h1 ne $h2 or $p1 ne $p2;
 
 if (defined $env_pass and not defined $w2)
 {
@@ -2594,16 +2918,107 @@ if ($ask_pass and not defined $w2)
 die "sorry, threading does not seem to work with PostgreSQL driver"
   if not $debug and $threads and ($db1 eq 'pgsql' or $db2 eq 'pgsql');
 
+# fix some settings for SQLite
+if (not $debug and ($db1 eq 'sqlite' or $db2 eq 'sqlite'))
+{
+  # SQLite/PostgreSQL & SQLite/MySQL
+  if ($db1 ne $db2) {
+    # ??? not null detection optimization does not work for SQLite...
+    if ($null eq 'hash') {
+      warn "hash null handling does not work in mixed SQLite mode, using text";
+      $null = 'text';
+    }
+    # see unpack in PGC_MD5 definition?
+    if ($checksum eq 'md5') {
+      warn "md5 checksum does not work in mixed SQLite mode, using ck";
+      $checksum = 'ck';
+    }
+    # signed integer issue...
+    if ($agg eq 'xor' and ($db1 eq 'pgsql' or $db2 eq 'pgsql')) {
+      warn "xor aggregate does not work in SQLite/PostgreSQL mode, using sum";
+      $agg = 'sum';
+    }
+  }
+  # adjust some settings
+  if ($do_lock and $db1 eq $db2 and $b1 eq $b2) {
+    warn "sorry, disabling locking, cannot lock same base twice with sqlite";
+    $do_lock = 0;
+  }
+  if ($do_lock and not $do_trans) {
+    warn "locking requires a transaction with sqlite";
+    $do_trans = 1;
+  }
+}
+
+if (not $debug)
+{
+  if ($async and (not $M{$db1}{async} or not $M{$db2}{async})) {
+    warn "sorry, no asynchronous mode with $db1 or $db2";
+    $async = 0;
+  }
+  if ($threads and (not $M{$db1}{threads} or not $M{$db2}{threads})) {
+    warn "sorry, no threads with $db1 or $db2";
+    $threads = 0;
+  }
+  # fix default options when using threads...
+  if ($threads) {
+    my $changed = 0;
+    # it seems that statements are closed when playing with threads
+    # so we cannot use transactions.
+    $do_trans = 0, $changed++ unless $do_trans==0;
+    #warn "WARNING $changed options fixed for threads..." if $changed;
+    warn "WARNING option '--transaction' disabled for threads..." if $changed;
+    # note: do_lock & temp==0 seems a bad idea.
+  }
+  # work around multiple issues with firebird...
+  if ($db1 eq 'firebird' or $db2 eq 'firebird') {
+    if ($do_trans) {
+      warn "sorry, no transaction with firebird";
+      $do_trans = 0;
+    }
+    if ($temp) {
+      warn "sorry, no temporary tables with firebird";
+      $temp = 0;
+    }
+    if ($do_lock) {
+      warn "sorry, no table locks with firebird";
+      $do_lock = 0;
+    }
+    unless ($clear) {
+      warn "sorry, forcing --clear with firebird";
+      $clear = 1;
+    }
+    if ($agg eq 'xor') {
+      warn "sorry, xor is not implemented for firebird, using sum";
+      # sum does not work well either
+      $agg = 'sum';
+    }
+    if ($checksum eq 'md5') {
+      warn "sorry, md5 checksum not implemented for firebird, using ck";
+      $checksum = 'ck';
+    }
+    if ($checksize==8) {
+      warn "sorry, downgrading checksize to 4 for firebird";
+      $checksize = 4;
+    }
+  }
+}
+
 # consistency check for --lock & --transaction
 if ($do_lock and ($db1 eq 'pgsql' or $db2 eq 'pgsql')) {
   die "--lock requires --transaction for pgsql" unless $do_trans;
+}
+if ($do_lock and ($db1 eq 'sqlite' or $db2 eq 'sqlite')) {
+  die "--lock requires --transaction for sqlite" unless $do_trans;
 }
 
 # there is signed (pg)/unsigned (my) issue with key xor4 in mixed mode
 # at least with md5. note that the answer seems okay in the end, but more
 # path than necessary are investigated.
-die "sorry, xor aggregate does not work well in mixed mode"
-  if not $debug and $agg eq 'xor' and $db1 ne $db2;
+die "sorry, xor aggregate does not work well in pg/my mixed mode"
+  if not $debug and $agg eq 'xor' and
+     ($db1 eq 'pgsql' and $db2 eq 'mysql' or
+      $db1 eq 'mysql' and $db2 eq 'pgsql');
 
 # consistency checks for --use-(key|tuple)(-checksum)?
 die "--use-key and --key-checksum are not compatible"
@@ -2614,6 +3029,20 @@ die "--tuple-checksum implies either --use-key or --key-checksum"
 
 die "--key-checksum implies --tuple-checksum"
   if defined $key_cs and not defined $tup_cs;
+
+# set needed attributes for asynchronous queries
+if ($async)
+{
+  if ($db1 eq 'pgsql' or $db2 eq 'pgsql') {
+    use DBD::Pg qw(:async); # just for 1 & 4 constants
+    $M{pgsql}{attrs} = { pg_async => PG_ASYNC + PG_OLDQUERY_WAIT };
+  }
+  if ($db1 eq 'mysql' or $db2 eq 'mysql') {
+    # alas, mysql lacks the nice lazyness of PG_OLDQUERY_WAIT,
+    # so I have to always try to wait before a prepare/do
+    $M{mysql}{attrs} = { async => 1 };
+  }
+}
 
 # ??? what about other checks?
 
@@ -2700,8 +3129,8 @@ die "column number of attributes does not match" unless @$c1 == @$c2;
 
 # whether to use nullability
 my ($pk1, $pk2, $pc1, $pc2);
-my $fmt1 = null_template($db1, $null, $checksum, $checksize);
-my $fmt2 = null_template($db2, $null, $checksum, $checksize);
+my $fmt1 = &{$M{$db1}{null}}($null, $checksum, $checksize);
+my $fmt2 = &{$M{$db2}{null}}($null, $checksum, $checksize);
 my $dhpbt1 = "$db1:$h1:$p1:$b1:$t1";
 my $dhpbt2 = "$db2:$h2:$p2:$b2:$t2";
 
@@ -2714,6 +3143,7 @@ if ($usekey) {
   # key 1
   die "use-key option requires a scalar key, got (@$k1)" if @$k1 != 1;
   my $type1 = col_type($dbh1, $dhpbt1, $db1, $$k1[0]);
+  # both next checks are usually okay from sqlite
   warn "use-key option requires an integer key 1, got $type1"
     unless $type1 =~ /int/i;
   warn "use-key option requires a NOT NULL key 1"
@@ -2721,6 +3151,7 @@ if ($usekey) {
   # key 2
   # size is already checked as same as k1
   my $type2 = col_type($dbh2, $dhpbt2, $db2, $$k2[0]);
+  # idem, okay from sqlite
   warn "use-key option requires an integer key 2, got $type2"
     unless $type2 =~ /int/i;
   warn "use-key option requires a NOT NULL key 2"
@@ -2831,7 +3262,8 @@ while ($mask) {
   push @masks, $mask;
 }
 my $levels = @masks;
-splice @masks, $max_levels if $max_levels; # cut-off option
+# handle cut-off option
+splice @masks, $max_levels if $max_levels and @masks>$max_levels;
 verb 3, "masks=(@masks)";
 
 if ($stats) {
@@ -2998,7 +3430,7 @@ if ($synchronize and
     # undef $del_sth;
   }
 
-  # get values for insert of update
+  # get values for insert or update
   my ($val_sql, $val_sth);
   if ($c1 and @$c1)
   {
@@ -3029,6 +3461,8 @@ if ($synchronize and
 	# hmmm... may be raised on blobs?
 	die "unexpected values fetched for insert"
 	  unless @c1values and @c1values == @$c1;
+
+	&{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
       }
       # then insert the missing tuple
       sth_param_exec($do_it, "INSERT $t2", $ins_sth, $i, @c1values);
@@ -3055,6 +3489,8 @@ if ($synchronize and
         unless @c1values and @c1values == @$c1;
       # use it to update the other table
       sth_param_exec($do_it, "UPDATE $t2", $upt_sth, $u, @c1values);
+
+      &{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
     }
     # $upt_sth
   }
@@ -3132,10 +3568,10 @@ $tend = [gettimeofday];
 # some stats are collected out of time measures
 if ($stats)
 {
-  my $tk1 = subs_null(null_template($db1, 'text', 0, 0), $dbh1, $dhpbt1, $k1);
+  my $tk1 = subs_null(&{$M{$db1}{null}}('text', 0, 0), $dbh1, $dhpbt1, $k1);
   $key_size = col_size($dbh1, $db1, $t1, $tk1);
   $col_size = col_size($dbh1, $db1, $t1,
-		       [subs(null_template($db1, 'text', 0, 0), @$c1)]);
+		       [subs(&{$M{$db1}{null}}('text', 0, 0), @$c1)]);
 }
 
 # final stuff:
@@ -3247,5 +3683,11 @@ if (defined $stats)
 # this simple strategy is okay because the validation does a comparison, then
 # a synchronization and then checks that both tables are indeed identical.
 # this check may fail if there is a hash collision.
-die "unexpected number of differences (got $count, expecting $expect)"
-  if defined $expect and $expect != $count;
+if (defined $expect and $expect != $count) {
+  if ($expect_warn) {
+    warn "unexpected number of differences (got $count, expecting $expect)";
+  }
+  else {
+    die "unexpected number of differences (got $count, expecting $expect)";
+  }
+}

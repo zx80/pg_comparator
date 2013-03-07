@@ -1,4 +1,4 @@
-# $Id: dev.mk 1398 2012-10-28 10:52:01Z fabien $
+# $Id: dev.mk 1472 2013-03-07 15:57:19Z coelho $
 
 # script distribution
 dir	= $(name)
@@ -33,7 +33,7 @@ $(name): $(name).pl
 
 tgz: $(name)-$(VERSION).tgz
 
-# for a new version, run in the .. directory: make version=1.8.2 publish
+# for a new version, run in the .. directory: make VERSION=2.2.0 publish
 # then edit pg_comparator.pl and ../local.mk to fix the version as well.
 # keep a copy of the targz in ~/SAVE/SOFTS/
 # distribute manually on pgfoundry.
@@ -45,6 +45,6 @@ $(name)-$(VERSION).tgz: $(F.dist)
 
 clean: dev-clean
 dev-clean:
-	$(RM) $(name) *~ LICENSE
+	$(RM) $(name) *~ LICENSE base.db
 
 include test.mk

@@ -1,4 +1,4 @@
-# $Id: Makefile 1383 2012-08-20 14:18:53Z fabien $
+# $Id: Makefile 1460 2012-11-02 18:21:27Z fabien $
 
 #
 # PostgreSQL stuff
@@ -58,6 +58,25 @@ mysql_uninstall:
 	$(RM) $(addprefix $(MYDIR),$(MY.so) $(MY.sql))
 
 #
+# SQLite stuff
+#
+SQLITE.libdir	= /usr/local/lib
+
+sqlite_checksum.so: sqlite_checksum.c
+	gcc -Wall -fPIC -shared $< -o $@
+
+sqlite_install: sqlite_checksum.so
+	cp $< $(SQLITE.libdir)/
+	chmod a+rx $(SQLITE.libdir)/sqlite_checksum.so
+
+sqlite_uninstall:
+	$(RM) $(SQLITE.libdir)/sqlite_checksum.so
+
+clean: sqlite-clean
+sqlite-clean:
+	$(RM) sqlite_checksum.so
+
+#
 # common cleanup
 #
 clean: local-clean
@@ -68,4 +87,3 @@ local-clean:
 # development stuff is ignored by the distribution
 #
 -include dev.mk
-#include test.mk

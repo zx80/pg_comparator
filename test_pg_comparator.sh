@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 1369 2012-08-20 08:07:59Z fabien $
+# $Id: test_pg_comparator.sh 1454 2012-11-01 19:57:05Z fabien $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost -- \
@@ -12,7 +12,7 @@ PATH=$PATH:.
 set -o pipefail
 
 # default values
-rows=1000 name=foo width=5 nkey=0 ncol=2 base=$USER
+rows=1000 name=foo width=5 nkey=0 ncol=2 base1=$USER base2=$USER
 seed=$(date +%s)
 
 # operations to perform
@@ -33,7 +33,9 @@ while [[ "$1" && "$1" != '--' ]] ; do
     --auth|-a) auth1="$1" ; auth2="$1" ; shift ;;
     --auth1|-1) auth1="$1" ; shift ;;
     --auth2|-2) auth2="$1" ; shift ;;
-    --base|-b) base="$1" ; shift ;;
+    --base|-b) base1="$1"; base2="$1" ; shift ;;
+    --base1|-b1) base1="$1" ; shift ;;
+    --base2|-b2) base2="$1" ; shift ;;
     --name|-n) name="$1" ; shift ;;
     # data generation
     --seed|-s) seed=$1 ; shift ;;
@@ -67,7 +69,7 @@ while [[ "$1" && "$1" != '--' ]] ; do
       echo -e \
 	"usage: $0 [options] [-- pg-comparator-options...]\n" \
 	" -a auth: authority string for connection\n" \
-	" -b base: database name\n" \
+	" -b[12] base: database name\n" \
 	" -n name: table prefix\n" \
 	" -s seed: random generator seed, default is seconds since 1970\n" \
 	" -r rows: vertical size\n" \
@@ -164,17 +166,10 @@ function create_table()
   local engine=
   [ $db = 'mysql' -a "$eng" ] && engine="--engine $eng"
 
-  echo "BEGIN;"
-
   # create and fill tables
-  echo "DROP TABLE IF EXISTS ${name};"
-
   rand_table.pl --$db --table ${name} --seed $seed --rows $rows \
-	--keys=$keys --columns=$cols --width $width $engine $trigger $nullkey
-
-  echo "COMMIT;"
-
-  [ $db = 'pgsql' ] && echo "VACUUM FULL ANALYZE ${name};"
+	--keys=$keys --columns=$cols --width $width --transaction \
+        $engine $trigger $nullkey
 
   return 0;
 }
@@ -203,7 +198,11 @@ function change_table()
   fi
 
   # change table in a transaction
-  echo "BEGIN;"
+  if [ $db = 'firebird' ] ; then
+    echo "COMMIT;"
+  else
+    echo "BEGIN;"
+  fi
 
   while [ $i -le $total ]
   do
@@ -279,32 +278,51 @@ function parse_conn()
     else
       echo "mysql --user=$user --pass=$pass --database=$base"
     fi
+  elif [[ $auth == sqlite://* ]] ; then
+      echo "sqlite3 $base"
+  elif [[ $auth == firebird://* ]] ; then
+    # debian/ubuntu use 'isql-fb' instead of 'isql'
+    echo "isql-fb -user $user -password $pass"
   else
     echo "invalid authority $auth" >&2
     exit 1
   fi
 }
 
-sql1=$(parse_conn $auth1 $base)
-[[ "$sql1" == psql* ]] && db1=pgsql || db1=mysql
+function database_name()
+{
+  echo ${1//:*/}
+}
+
+sql1=$(parse_conn $auth1 $base1)
+db1=$(database_name $auth1)
 #echo "sql1=$sql1 db1=$db1"
 
-sql2=$(parse_conn $auth2 $base)
-[[ "$sql2" == psql* ]] && db2=pgsql || db2=mysql
+sql2=$(parse_conn $auth2 $base2)
+db2=$(database_name $auth2)
 #echo "sql2=$sql2 db2=$db2"
 
 [ "$create" ] &&
 {
   if [ "$empty1" ] ; then rows1=0 ; else rows1=$rows ; fi
   # create and fill tables which will be identical, because same seed
-  create_table $db1 ${name}1 $seed $rows1 "$key1" "$col1" $width $eng | \
-    eval $sql1 &
+  {
+    [ $db1 = 'firebird' ] && echo "CONNECT '$base1';"
+    create_table $db1 ${name}1 $seed $rows1 "$key1" "$col1" $width $eng
+  } | eval $sql1 &
   wait=$!
+  # we wait for sqlite, because the same database cannot be locked twice
+  if [ $db1 = 'sqlite' ] ; then
+    wait $wait
+    wait=
+  fi
   if [ "$empty2" ] ; then rows2=0 ; else rows2=$rows ; fi
   # however some more fill-in is done to make space for delete
-  create_table $db2 ${name}2 $seed $(($rows2+$del)) \
-    "$key2" "$col2" $width $eng | \
-      eval $sql2
+  {
+    [ $db2 = 'firebird' ] && echo "CONNECT '$base2';"
+    create_table $db2 ${name}2 $seed $(($rows2+$del)) \
+      "$key2" "$col2" $width $eng
+  } | eval $sql2
   status=$?
   if [ $status -ne 0 ] ; then
     echo "table 2 generation failed: $status" >&2
@@ -315,8 +333,11 @@ sql2=$(parse_conn $auth2 $base)
 [ "$modify" -a ! "$empty1$empty2" ] &&
 {
   # modify the second table
-  change_table $db2 ${name}2 $ncol $rows "$key2" "$col2" \
-      $upt $ins 0 $nul $rev | eval $sql2
+  {
+    [ $db2 = 'firebird' ] && echo "CONNECT '$base2';"
+    change_table $db2 ${name}2 $ncol $rows "$key2" "$col2" \
+      $upt $ins 0 $nul $rev
+  } | tee /dev/tty | eval $sql2
   status=$?
   if [ $status -ne 0 ] ; then
     echo "table 2 changes failed: $status" >&2
@@ -345,12 +366,13 @@ if [ "$cmp" ] ; then
   echo "COMPARE $(date)"
   # use implicit authority in second connection
   echo pg_comparator -e $expect "$@" \
-    $auth1/${base}/${name}1?$key1:$col1 $auth2/${base}/${name}2?$key2:$col2
+    $auth1/${base1}/${name}1?$key1:$col1 $auth2/${base2}/${name}2?$key2:$col2
   time pg_comparator -e $expect "$@" \
-    $auth1/${base}/${name}1?$key1:$col1 $auth2/${base}/${name}2?$key2:$col2
+    $auth1/${base1}/${name}1?$key1:$col1 $auth2/${base2}/${name}2?$key2:$col2
   status=$?
 fi
 
+# hmmm... pgsql specific
 [ "$keep" ] ||
 {
   echo "CLEAN $(date)"

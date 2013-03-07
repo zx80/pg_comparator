@@ -1,6 +1,6 @@
-#! /usr/bin/perl
+#!/usr/bin/perl
 #
-# $Id: rand_table.pl 1367 2012-08-20 07:38:04Z fabien $
+# $Id: rand_table.pl 1459 2012-11-02 16:53:44Z fabien $
 #
 # generates a sample table for pg_comparator tests
 #
@@ -18,7 +18,7 @@ my $key = 0;         # starting id
 my $null = 1;        # declare elements as nullable
 my $nullkey = 0;     # allow null keys
 my $create = 1;      # whether to create the table
-my $db = 'pgsql';    # target database, 'pgsql' or 'mysql'
+my $db = 'pgsql';    # target database: pgsql mysql sqlite firebird
 my $transaction = 0; # whether to wrap in a transaction
 my ($engine, $key_cs, $tup_cs); # mysql engine, key/tuple checksum attributes
 
@@ -34,9 +34,12 @@ GetOptions(
   "null-key|nk!" => \$nullkey,
   "start-key|start|sk|K=i" => \$key,
   "transaction|T!" => \$transaction,
-  # target database
+  # target databases
   "mysql" => sub { $db = 'mysql'; },
   "pgsql" => sub { $db = 'pgsql'; },
+  "sqlite" => sub { $db = 'sqlite'; },
+  "firebird" => sub { $db = 'firebird'; },
+  # for mysql only
   "engine=s" => \$engine,
   # auto maintained checksums
   "key-checksum|kc=s" => \$key_cs,
@@ -61,6 +64,9 @@ die "--*-checksum options work only for pgsql"
 die "engine option only valid under mysql"
   if defined $engine and $db ne 'mysql';
 
+# force commit...
+$transaction = 1 if $db eq 'firebird';
+
 # generate an auto-maintained checksum on some not null cols
 sub column_checksum($$$@)
 {
@@ -82,28 +88,47 @@ sub column_checksum($$$@)
     "FOR EACH ROW EXECUTE PROCEDURE ${table}_${name}_checksum();\n";
 }
 
+# define types
+my %SQL = (
+  'pgsql' => {
+    'droptable' => 'DROP TABLE IF EXISTS',
+    'tk' => 'TEXT', 'text' => 'TEXT',
+    2 => 'INT2', 4 => 'INT4', 8 => 'INT8' },
+  'mysql' => {
+    'droptable' => 'DROP TABLE IF EXISTS',
+    'tk' => 'VARCHAR(64)', 'text' => 'TEXT',
+    2 => 'INTEGER', 4 => 'INTEGER', 8 => 'BIGINT' },
+  'sqlite' => {
+    'droptable' => 'DROP TABLE IF EXISTS',
+    'tk' => 'TEXT', 'text' => 'TEXT',
+    2 => 'INTEGER', 4 => 'INTEGER', 8 => 'INTEGER' },
+  'firebird' => {
+    'droptable' => "COMMIT;\nDROP TABLE",
+    'tk' => 'VARCHAR(64)', 'text' => 'BLOB SUB_TYPE TEXT',
+    2 => 'INTEGER', 4 => 'INTEGER', 8 => 'BIGINT' }
+);
+
 # declare table
 if ($create)
 {
-  print "DROP TABLE IF EXISTS $table;\n";
+  print "$SQL{$db}{droptable} $table;\n" if $SQL{$db}{droptable};
+  print "COMMIT;\n" if $db eq 'firebird';
   print "CREATE TABLE $table(\n  id INTEGER";
   # key columns
   for my $k (@keys) {
     # note: mysql does not like BLOB/CLOB types in keys...
     # NOT NULL: implied by PRIMARY KEY if used
-    print ",\n  $k ", ($db eq 'pgsql'? 'TEXT': 'VARCHAR(64)');
+    print ",\n  $k $SQL{$db}{tk}";
   }
   # other columns
   for my $c (@columns) {
     # note: mysql: max len for text is 65535
-    print ",\n  $c TEXT", ($null? '': ' NOT NULL');
+    print ",\n  $c $SQL{$db}{text}", ($null? '': ' NOT NULL');
   }
 
   # checksums attributes
-  print ",\n  $key_cs " . ($db eq 'pgsql'? 'INT4': 'INTEGER') . ' NOT NULL'
-    if $key_cs;
-  print ",\n  $tup_cs " . ($db eq 'pgsql'? 'INT8': 'BIGINT') . ' NOT NULL'
-    if $tup_cs;
+  print ",\n  $key_cs $SQL{$db}{4} NOT NULL" if $key_cs;
+  print ",\n  $tup_cs $SQL{$db}{8} NOT NULL" if $tup_cs;
 
   # PRIMARY KEY implies NOT NULL, but UNIQUE does not
   print
@@ -128,12 +153,16 @@ sub ran($)
 if ($rows)
 {
   # start transaction
-  print "BEGIN;\n" if $transaction;
+  print "BEGIN;\n" if $transaction and $db ne 'firebird';
+  print "COMMIT;\n" if $db eq 'firebird';
 
   # fill table
   print "COPY $table(", join(',', 'id', @keys, @columns), ") FROM STDIN;\n"
       if $db eq 'pgsql';
-  print "INSERT INTO $table VALUES\n" if $db eq 'mysql';
+
+  my $insert = "INSERT INTO $table VALUES";
+
+  print "$insert\n" if $db eq 'mysql';
 
   # generate speudo random table contents
   my $i = 0;
@@ -147,13 +176,17 @@ if ($rows)
       }
       print "\n";
     }
-    elsif ($db eq 'mysql') {
+    elsif ($db eq 'mysql' or $db eq 'sqlite' or $db eq 'firebird') {
+      print $insert if $db eq 'sqlite' or $db eq 'firebird';
       print '(';
       print (($nullkey and $i==1)? 'NULL': ($key+$i));
       for my $c (@keys, @columns) {
 	print ",'", ran($width), "'";
       }
-      print ")", ($i!=$rows? ',': ''), "\n";
+      print ")";
+      print ($i!=$rows? ',': '') if $db eq 'mysql';
+      print ";" if $db eq 'sqlite' or $db eq 'firebird';
+      print "\n";
     }
     else {
       die "unexpected db=$db";
@@ -167,5 +200,5 @@ if ($rows)
   print "COMMIT;\n" if $transaction;
 
   # end fill table
-  print "ANALYZE $table;\n" if $db eq 'pgsql';
+  print "ANALYZE $table;\n" if $db eq 'pgsql' or $db eq 'sqlite';
 }

@@ -32,3 +32,17 @@ Then load the needed extensions (casts, checksum functions):
 To uninstall, do:
 
    	sh> make mysql_uninstall
+
+
+* SQLite
+
+You need the sqlite3-dev package to compile extensions.
+
+	sh> make sqlite_install
+
+See "sqlite_checksum.sql" file for loading checksum functions and
+a integer xor aggregate.
+
+To uninstall, do:
+
+   	sh> make sqlite_uninstall

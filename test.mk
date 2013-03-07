@@ -1,11 +1,20 @@
 #
-# $Id: test.mk 1397 2012-10-28 09:52:43Z fabien $
+# $Id: test.mk 1473 2013-03-07 20:41:38Z coelho $
 #
 # run pg_comparator validation checks
+#
+# See file "auth.mk" for defining macros:
+#   auth1 (pgsql), auth2 (mysql), auth3 (sqlite), auth4/fdb (firebird)
+#
+# Run: sh> make validate_...
+#   where ...=sanity|fast|hour|full|...
 #
 # having that as a makefile is moderately justified.
 
 SHELL	= /bin/bash
+
+# set default auth*
+-include auth.mk
 
 # rough testing, including synchronization
 AUTH	= localhost
@@ -50,16 +59,25 @@ key2	:= $(shell echo id $(addprefix l,$(keyn))|tr ' ' ',')
 AUTH1	= $(AUTH)
 AUTH2	= $(AUTH)
 
+# database could be different
+DB1	= $(DB)
+DB2	= $(DB)
+
 # connections
-CONN1	= $(AUTH1)/$(DB)/$(tab1)?$(key1):$(col1)
-CONN2	= $(AUTH2)/$(DB)/$(tab2)?$(key2):$(col2)
+CONN1	= $(AUTH1)/$(DB1)/$(tab1)?$(key1):$(col1)
+CONN2	= $(AUTH2)/$(DB2)/$(tab2)?$(key2):$(col2)
 
 # pre/post comparison settings
 PG_PRE	= :
 PG_POST	= :
 
-# can be overriden for mixed tests
+# can be overriden for some tests
 xor	= xor
+sum	= sum
+md5	= md5
+ck	= ck
+hash	= hash
+text	= text
 
 #
 # test case generation for pg_comparator
@@ -79,7 +97,7 @@ CRTOPTS	=
 .PHONY: run
 run: pg_comparator
 	./test_pg_comparator.sh \
-	  -1 $(AUTH1) -2 $(AUTH2) -b $(DB) \
+	  -1 $(AUTH1) -2 $(AUTH2) -b1 $(DB1) -b2 $(DB2) \
 	  -k $(KEYS) -c $(COLS) -r $(ROWS) -w $(WIDTH) \
 	  -t $(TOTAL) -e $(ENGINE) $(RUNOPS) $(crtopts) $(CRTOPTS)
 	$(PG_PRE)
@@ -162,26 +180,29 @@ full_mix: full_sizes
 #
 .PHONY: fast
 fast:
-	$(MAKE) CF=md5 CS=8 AGG=sum NULL=text FOLD=1 KEYS=0 COLS=0 run
-	$(MAKE) CF=ck  CS=8 AGG=sum NULL=text FOLD=2 KEYS=0 COLS=1 pgcopts+=' -u' run
-	$(MAKE) CF=md5 CS=8 AGG=$(xor) NULL=hash FOLD=1 KEYS=0 COLS=1 run
-	$(MAKE) CF=md5 CS=8 AGG=sum NULL=text FOLD=1 KEYS=1 COLS=2 pgcopts+=' --max-levels=3' run
-	$(MAKE) CF=md5 CS=4 AGG=sum NULL=hash FOLD=3 KEYS=0 COLS=2 pgcopts+=' --lock' run
-	$(MAKE) CF=ck  CS=8 AGG=sum NULL=text FOLD=2 KEYS=0 COLS=1 pgcopts+=' --cc=insert' run
-	$(MAKE) CF=ck  CS=4 AGG=sum NULL=hash FOLD=4 KEYS=1 COLS=0 pgcopts+=' --no-lock' run
-	$(MAKE) CF=ck  CS=8 AGG=sum NULL=hash FOLD=4 KEYS=1 COLS=3 pgcopts+=' --size=$(ROWS)' run
-	$(MAKE) CF=md5 CS=8 AGG=$(xor) NULL=text FOLD=5 KEYS=1 COLS=1 pgcopts+=' --cc=insert' run
-	$(MAKE) CF=ck  CS=4 AGG=$(xor) NULL=hash FOLD=7 KEYS=2 COLS=3 run
-	$(MAKE) CF=ck  CS=8 AGG=$(xor) NULL=text FOLD=6 KEYS=1 COLS=2 run
-	$(MAKE) CF=ck  CS=8 AGG=$(xor) NULL=hash FOLD=8 KEYS=2 COLS=3 run
+	$(MAKE) CF=$(md5) CS=8 AGG=$(sum) NULL=$(text) FOLD=1 KEYS=0 COLS=0 run
+	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(text) FOLD=2 KEYS=0 COLS=1 pgcopts+=' -u' run
+	$(MAKE) CF=$(md5) CS=8 AGG=$(xor) NULL=$(hash) FOLD=1 KEYS=0 COLS=1 run
+	$(MAKE) CF=$(md5) CS=8 AGG=$(sum) NULL=$(text) FOLD=1 KEYS=1 COLS=2 pgcopts+=' --max-levels=3' run
+	$(MAKE) CF=$(md5) CS=4 AGG=$(sum) NULL=$(hash) FOLD=3 KEYS=0 COLS=2 pgcopts+=' --lock' run
+	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(text) FOLD=2 KEYS=0 COLS=1 pgcopts+=' --cc=insert' run
+	$(MAKE) CF=$(ck)  CS=4 AGG=$(sum) NULL=$(hash) FOLD=4 KEYS=1 COLS=0 pgcopts+=' --no-lock' run
+	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(hash) FOLD=4 KEYS=1 COLS=3 pgcopts+=' --size=$(ROWS)' run
+	$(MAKE) CF=$(md5) CS=8 AGG=$(xor) NULL=$(text) FOLD=5 KEYS=1 COLS=1 pgcopts+=' --cc=insert' run
+	$(MAKE) CF=$(ck)  CS=4 AGG=$(xor) NULL=$(hash) FOLD=7 KEYS=2 COLS=3 run
+	$(MAKE) CF=$(ck)  CS=8 AGG=$(xor) NULL=$(text) FOLD=6 KEYS=1 COLS=2 run
+	$(MAKE) CF=$(ck)  CS=8 AGG=$(xor) NULL=$(hash) FOLD=8 KEYS=2 COLS=3 run
 
 # this is scripted rather than relying on dependencies
 # so that the error messages are clearer
-.PHONY: fast_pg fast_my fast_mix
+.PHONY: fast_pg fast_my fast_mix fast_lite
 fast_pg: fast
 fast_my: fast
 fast_mix: xor=sum
 fast_mix: fast
+fast_lite: fast
+fast_firebird: md5=ck
+fast_firebird: fast
 
 ######################################################################## SANITY
 #
@@ -190,17 +211,15 @@ fast_mix: fast
 .PHONY: sanity
 # default KEYS=0 COLS=1
 sanity:
-	$(MAKE) CF=ck CS=8 AGG=sum NULL=text FOLD=2 run
+	$(MAKE) CF=ck AGG=sum NULL=text FOLD=2 run
 
-.PHONY: sanity_pg sanity_my sanity_mix
+.PHONY: sanity_pg sanity_my sanity_mix sanity_lite
 sanity_pg: sanity
 sanity_my: sanity
 sanity_mix: sanity
+sanity_lite: sanity
 
 #################################################################### VALIDATION
-#
-# make auth1=pgsql://... auth2=mysql://... validate_XXX
-# where XXX=sanity|fast|hour|full|...
 #
 # see also feature & release validations
 #
@@ -211,12 +230,12 @@ sanity_mix: sanity
 VALIDATE=sanity
 
 .PHONY: check_validation_environment
-# auth1 must be pgsql and auth2 must be mysql
 check_validation_environment: pg_comparator
-	[[ "$(auth1)" == pgsql://* ]] || exit 1
-	[[ "$(auth2)" == mysql://* ]] || exit 2
-	[[ "$(VALIDATE)" ]] || exit 3
 	perl -c ./pg_comparator
+	[[ "$(VALIDATE)" ]] || exit 1
+	[[ "$(auth1)" == pgsql://* ]] || exit 2 ; \
+	[[ "$(auth2)" == mysql://* ]] || exit 3 ; \
+	[[ "$(auth3)" == sqlite://* ]] || exit 4
 
 # threads never worked with pgsql (try with -T --debug)
 .PHONY: validate_pg
@@ -311,15 +330,18 @@ validate_full:
 ############################################################ FEATURE VALIDATION
 
 # tests some options without setting rows
-# 60+18+90+9 = 177
-# 24+96+60   = 180
+# 60+18+90 = 168
+# 18+36+36+36+24+96+60 = 306
 .PHONY: validate_feature
 validate_feature:
 	@echo "# $@ ROWS=$(ROWS) start"
 	$(MAKE) validate_cc
-	$(MAKE) validate_auto   # pgsql only
+	$(MAKE) validate_auto # pgsql only
 	$(MAKE) validate_empty
-	$(MAKE) validate_quote
+	[ $(ROWS) = 10 ] && $(MAKE) validate_quote || exit 0
+	[ $(ROWS) = 10 ] && $(MAKE) validate_sqlite || exit 0 # sqlite only
+	[ $(ROWS) = 10 ] && $(MAKE) validate_mylite || exit 0 # partial
+	[ $(ROWS) = 10 ] && $(MAKE) validate_pglite || exit 0 # partial
 	[ $(ROWS) = 10 ] && $(MAKE) validate_engine || exit 0 # mysql only
 	[ $(ROWS) = 10 ] && $(MAKE) validate_width || exit 0
 	[ $(ROWS) = 10 ] && $(MAKE) validate_nullkey || exit 0
@@ -399,7 +421,7 @@ validate_nullkey:
 
 # validate with a quoted table names
 # ??? should also test column names?
-# 3*3 = 9 runs
+# 3*2*3 = 18 runs
 .PHONY: validate_quote
 validate_quote:
 	@echo "# $@ start"
@@ -408,18 +430,80 @@ validate_quote:
 	$(MAKE) tab1=\`foo1\` tab2=\`foo2\`            ROWS=10 validate_my
 	@echo "# $@ done"
 
+# basic test with sqlite3
+# note: ROWS=500 => too many terms in compound SELECT statement,
+#       because of the many INSERT values.
+# 12*3 = 36 runs
+.PHONY: validate_sqlite
+validate_sqlite:
+	@echo "# $@ start"
+	PGC_SQLITE_LOAD_EXTENSION=/usr/local/lib/sqlite_checksum.so \
+	  $(MAKE) AUTH1=$(auth3) AUTH2=$(auth3) DB=base.db ROWS=10 fast_lite
+	@echo "# $@ done"
+
+# basic test with firebird, not included in feature
+# 12*3 = 36 runs
+.PHONY: validate_firebird
+validate_firebird:
+	@echo "# $@ start"
+	$(MAKE) AUTH1=$(auth4) AUTH2=$(auth4) DB=$(fdb) ROWS=10 fast_firebird
+	@echo "# $@ done"
+
+# sqlite/mysql
+# 12*3 = 36 runs
+.PHONY: validate_mylite
+validate_mylite:
+	@echo "# $@ start"
+	PGC_SQLITE_LOAD_EXTENSION=/usr/local/lib/sqlite_checksum.so \
+	  $(MAKE) AUTH1=$(auth2) AUTH2=$(auth3) \
+	    DB1=test DB2=base.db ROWS=10 fast_lite
+	PGC_SQLITE_LOAD_EXTENSION=/usr/local/lib/sqlite_checksum.so \
+	  $(MAKE) AUTH2=$(auth2) AUTH1=$(auth3) \
+	    DB2=test DB1=base.db ROWS=10 fast_lite
+	@echo "# $@ done"
+
+# sqlite/pgsql
+# 12*3 = 36 runs
+.PHONY: validate_pglite
+validate_pglite:
+	@echo "# $@ start"
+	PGC_SQLITE_LOAD_EXTENSION=/usr/local/lib/sqlite_checksum.so \
+	  $(MAKE) AUTH1=$(auth1) AUTH2=$(auth3) \
+	    DB1=test DB2=base.db ROWS=10 fast_lite
+	PGC_SQLITE_LOAD_EXTENSION=/usr/local/lib/sqlite_checksum.so \
+	  $(MAKE) AUTH2=$(auth1) AUTH1=$(auth3) \
+	    DB2=test DB1=base.db ROWS=10 fast_lite
+	@echo "# $@ done"
+
 ####################################################################### RELEASE
 
-# about 10 minutes
+# try collisions with small 2-byte (65536 values) checksum
+# the first one may fail.
+# the second one very likely fails.
+# this is because some diffs are in collisions so they cannot be detected,
+# this the --expect option fails, hence the --expect-warn option.
+# 8 runs in about 6 minutes
+.PHONY: validate_collisions
+validate_collisions:
+	@echo "# $@ start"
+	./test_collision.sh $(auth1) $(DB)
+	$(MAKE) KEYS=1 COLS=1 CS=2 ROWS=100000 validate_pg
+	$(MAKE) KEYS=1 COLS=1 CS=2 TOTAL=90000 ROWS=100000 \
+	  PGCOPTS+='--expect-warn' validate_pg
+	@echo "# $@ done"
+
+# about 20 minutes
 # ROWS=10: high change rate (80%)
-# ROWS=100: low change rate (8%)
-# 348+168+300 = 816
+# ROWS=100: medium change rate (8%)
+# ROWS=1000: low change rate (<1%)
+# 402+168+360+8 = 938
 .PHONY: validate_release
 validate_release:
 	@echo "# $@ start"
-	$(MAKE) ROWS=10   validate_feature && \
-	$(MAKE) ROWS=1000 validate_feature && \
-	$(MAKE)           validate_fast && \
+	$(MAKE) ROWS=10   validate_feature    && \
+	$(MAKE) ROWS=1000 validate_feature    && \
+	$(MAKE)           validate_fast       && \
+	$(MAKE)           validate_collisions && \
 	echo "# $@ done in $$SECONDS seconds"
 	@echo "# $@ done"
 
