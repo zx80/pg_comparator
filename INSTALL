@@ -41,7 +41,7 @@ You need the sqlite3-dev package to compile extensions.
 	sh> make sqlite_install
 
 See "sqlite_checksum.sql" file for loading checksum functions and
-a integer xor aggregate.
+an integer xor aggregate.
 
 To uninstall, do:
 

@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1473 2013-03-07 20:41:38Z coelho $
+# $Id: pg_comparator.pl 1480 2013-05-09 10:24:53Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -1091,6 +1091,12 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 
 =item B<version @VERSION@> @DATE@ (r@REVISION@)
 
+Do not die on missing driver in URL, regression reported by I<Ivan Mincik>.
+The I<release> validation was run successfully
+on PostgreSQL 9.2.4 and MySQL 5.5.31.
+
+=item B<version 2.2.0> 2013-03-07 (r1473)
+
 Bug fix by I<Robert Coup>, which was triggered on hash collisions (again).
 This bug was introduced in 2.1.0 when getting rid of the key separator,
 and not caught by the validation.
@@ -1332,7 +1338,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1473 $';
+my $revision = '$Revision: 1480 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1868,7 +1874,7 @@ sub parse_conn($)
     $db = $1;
   }
   else {
-    die "no driver found in URL: $c";
+    verb 2, "no driver found in URL: $c" if $debug;
   }
   $c =~ s/^\w+:\/\///;
 
