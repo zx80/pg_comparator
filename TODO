@@ -16,5 +16,9 @@
 - DBD::mysql::db mysql_async_result failed:
   Gathering async_query_in_flight results for the wrong handle
   at ./pg_comparator line 1264.
+- mysql:
+  "Warning: Using unique option prefix pass instead of password is
+  deprecated and will be removed in a future release.
+  Please use the full name instead."
 - under -T may not really stop on errors?
 - under -T, should I lock shared variables before updating them?

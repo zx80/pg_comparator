@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1480 2013-05-09 10:24:53Z coelho $
+# $Id: pg_comparator.pl 1485 2014-01-08 21:24:58Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -1089,13 +1089,20 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 
 =over 4
 
-=item B<version @VERSION@> @DATE@ (r@REVISION@)
+=item B<version @VERSION@> (r@REVISION@ on @DATE@)
+
+Fix some warnings reported by I<Ivan Mincik>.
+Minor doc changes.
+The I<release> validation was run successfully
+on PostgreSQL 9.3.2 and MySQL 5.5.34.
+
+=item B<version 2.2.1> (r1480 on 2013-05-09)
 
 Do not die on missing driver in URL, regression reported by I<Ivan Mincik>.
 The I<release> validation was run successfully
 on PostgreSQL 9.2.4 and MySQL 5.5.31.
 
-=item B<version 2.2.0> 2013-03-07 (r1473)
+=item B<version 2.2.0> (r1473 on 2013-03-07)
 
 Bug fix by I<Robert Coup>, which was triggered on hash collisions (again).
 This bug was introduced in 2.1.0 when getting rid of the key separator,
@@ -1112,7 +1119,7 @@ Improved validation, in particular with a I<collisions> test.
 The I<release> and I<hour> validations were run successfully
 on PostgreSQL 9.2.3 and MySQL 5.5.29.
 
-=item B<version 2.1.2> 2012-10-28 (r1402)
+=item B<version 2.1.2> (r1402 on 2012-10-28)
 
 Fix an issue when table names were quoted, raised by I<Robert Coup>.
 Improved documentation, especially Section L</"SEE ALSO">.
@@ -1121,7 +1128,7 @@ Improved validation.
 The I<release> and I<hour> validations were run successfully
 on PostgreSQL 9.2.1 and MySQL 5.5.27.
 
-=item B<version 2.1.1> 2012-08-20 (r1375)
+=item B<version 2.1.1> (r1375 on 2012-08-20)
 
 Synchronization now handles possible NULLs in keys.
 Warn if key is nullable or not an integer under C<--use-key>.
@@ -1129,7 +1136,7 @@ Improved documentation, in particular non regression tests are described.
 The I<release> and I<hour> validations were run successfully
 on PostgreSQL 9.1.4 and MySQL 5.5.24.
 
-=item B<version 2.1.0> 2012-08-18 (r1333)
+=item B<version 2.1.0> (r1333 on 2012-08-18)
 
 Add C<--tuple-checksum> and C<--key-checksum> options so as to use existing
 possibly trigger-maintained checksums in the target tables instead of
@@ -1163,7 +1170,7 @@ Add and improve comments in the code.
 The I<release> and I<hour> validations were run successfully
 on PostgreSQL 9.1.4 and MySQL 5.5.24.
 
-=item B<version 2.0.1> 2012-08-10 (r1159)
+=item B<version 2.0.1> (r1159 on 2012-08-10)
 
 Add C<--source-*> options to allow taking over DBI data source specification.
 Change default aggregate to C<sum> so that it works as expected by default
@@ -1175,7 +1182,7 @@ systematically.
 The I<fast> validation was run successfully on PostgreSQL 9.1.4 and
 MySQL 5.5.24.
 
-=item B<version 2.0.0> 2012-08-09 (r1148)
+=item B<version 2.0.0> (r1148 on 2012-08-09)
 
 Use asynchronous queries so as to provide some parallelism to the comparison
 without the issues raised by threads. It is enabled by default and can be
@@ -1187,7 +1194,7 @@ Add and fix various comments in the code.
 The I<fast> validation was run successfully on PostgreSQL 9.1.4 and
 MySQL 5.5.24.
 
-=item B<version 1.8.2> 2012-08-07 (r1117)
+=item B<version 1.8.2> (r1117 on 2012-08-07)
 
 Bug fix in the merge procedure by I<Robert Coup> that could result in
 some strange difference reports in corner cases, when there were collisions
@@ -1199,7 +1206,7 @@ Try to detect these issues.
 Add a counter for metadata queries.
 Minor documentation improvements and fixes.
 
-=item B<version 1.8.1> 2012-03-24 (r1109)
+=item B<version 1.8.1> (r1109 on 2012-03-24)
 
 Change default separator again, to '|'.
 Fix C<--where> option mishandling when counting, pointed out by
@@ -1208,13 +1215,13 @@ I<Enrique Corona>.
 Post release note: the synchronisation is broken with the default separator
 in 1.8.1, do not use it, or use --separator='%'.
 
-=item B<version 1.8.0> 2012-01-08 (r1102)
+=item B<version 1.8.0> (r1102 on 2012-01-08)
 
 Change default separator to '%', which seems less likely,
 after issues run into by I<Emanuel Calvo>.
 Add more pointers and documentation.
 
-=item B<version 1.7.0> 2010-11-12 (r1063)
+=item B<version 1.7.0> (r1063 on 2010-11-12)
 
 Improved documentation.
 Enhancement and fix by I<Maxim Beloivanenko>: handle quoted table and
@@ -1224,7 +1231,7 @@ More stats, more precise, possibly in CSV format.
 Add timeout and use-null options.
 Fix subtle bug which occurred sometimes on kcs collisions in table I<T(0)>.
 
-=item B<version 1.6.1> 2010-04-16 (r754)
+=item B<version 1.6.1> (r754 on 2010-04-16)
 
 Improved documentation.
 Key and columns now defaults to primary key and all other columns of table
@@ -1238,7 +1245,7 @@ Threads now work a little, although it is still quite experimental.
 Fix a bug that made perl see differing checksum although they were equal, in
 some unclear conditions.
 
-=item B<version 1.6.0> 2010-04-03 (r701)
+=item B<version 1.6.0> (r701 on 2010-04-03)
 
 Add more functions (MD5, SUM) and sizes (2, 4, 8).
 Remove template parameterization which is much too fragile to expose.
@@ -1246,7 +1253,7 @@ Add a wrapping transaction which may speed up things a little.
 Implementation for MySQL, including synchronizing heterogeneous databases.
 Improved documentation. Extensive validation/non regression tests.
 
-=item B<version 1.5.2> 2010-03-22 (r564)
+=item B<version 1.5.2> (r564 on 2010-03-22)
 
 More documentation.
 Improved connection parsing with more sensible defaults.
@@ -1257,12 +1264,12 @@ out in I<Benjamin Mead Vandiver>'s PhD).
 This bad mask computation was introduced somehow between 1.3 and 1.4 as
 an attempt at simplifying the code.
 
-=item B<version 1.5.1> 2010-03-21 (r525)
+=item B<version 1.5.1> (r525 on 2010-03-21)
 
 More documentation.
 Add C<--expect> option for non regression tests.
 
-=item B<version 1.5.0> 2010-03-20 (r511)
+=item B<version 1.5.0> (r511 on 2010-03-20)
 
 Add more links.
 Fix so that with a key only (i.e. without additional columns), although
@@ -1270,23 +1277,23 @@ it could be optimized further in this case.
 Integrate patch by I<Erik Aronesty>: More friendly "connection parser".
 Add synchronization option to actually synchronize the data.
 
-=item B<version 1.4.4> 2008-06-03 (r438)
+=item B<version 1.4.4> (r438 on 2008-06-03)
 
 Manual connection string parsing.
 
-=item B<version 1.4.3> 2008-02-17 (r424)
+=item B<version 1.4.3> (r424 on 2008-02-17)
 
 Grumble! wrong tar pushed out.
 
-=item B<version 1.4.2> 2008-02-17 (r421)
+=item B<version 1.4.2> (r421 on 2008-02-17)
 
 Minor makefile fix asked for by I<Roberto C. Sanchez>.
 
-=item B<version 1.4.1> 2008-02-14 (r417)
+=item B<version 1.4.1> (r417 on 2008-02-14)
 
 Minor fix for PostgreSQL 8.3 by I<Roberto C. Sanchez>.
 
-=item B<version 1.4> 2007-12-24 (r411)
+=item B<version 1.4> (r411 on 2007-12-24)
 
 Port to PostgreSQL 8.2. Better documentation.
 Fix mask bug: although the returned answer was correct, the table folding
@@ -1294,18 +1301,18 @@ was not.
 DELETE/INSERT messages exchanged so as to match a 'sync' or 'copy' semantics,
 as suggested by I<Erik Aronesty>.
 
-=item B<version 1.3> 2004-08-31 (r239)
+=item B<version 1.3> (r239 on 2004-08-31)
 
 Project moved to L<PG Foundry|http://pgfoundry.org/>.
 Use cksum8 checksum function by default.
 Minor doc updates.
 
-=item B<version 1.2> 2004-08-27 (r220)
+=item B<version 1.2> (r220 on 2004-08-27)
 
 Added C<--show-all-keys> option for handling big chunks of deletes
 or inserts.
 
-=item B<version 1.1> 2004-08-26 (r210)
+=item B<version 1.1> (r210 on 2004-08-26)
 
 Fix algorithmic bug: checksums B<must> also include the key,
 otherwise exchanged data could be not detected if the keys were
@@ -1314,7 +1321,7 @@ Algorithmic section added to manual page.
 Thanks to I<Giuseppe Maxia> who asked for it.
 Various code cleanups.
 
-=item B<version 1.0> 2004-08-25 (r190)
+=item B<version 1.0> (r190 on 2004-08-25)
 
 Initial revision.
 
@@ -1338,7 +1345,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1480 $';
+my $revision = '$Revision: 1485 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1907,7 +1914,7 @@ sub parse_conn($)
   {
     my $kc_str;
 
-    if ($db eq 'sqlite' or $db eq 'firebird') {
+    if (defined $db and ($db eq 'sqlite' or $db eq 'firebird')) {
       # note: there may be "/" in the base file path...
       # if so, the last "/" is mandatory to mark the table name
       die "invalid path string '$path'\n"
@@ -2853,7 +2860,8 @@ usage(0, 0, 'expecting 2 arguments') unless @ARGV == 2;
 my ($db1, $u1, $w1, $h1, $p1, $b1, $t1, $k1, $c1) = parse_conn(shift);
 
 die "unexpected auth in first URI under sqlite"
-  if $db1 eq 'sqlite' and (defined $u1 or defined $h1 or defined $p1);
+  if defined $db1 and $db1 eq 'sqlite' and
+    (defined $u1 or defined $h1 or defined $p1);
 
 # set defaults and check minimum definitions.
 $db1 = 'pgsql' unless defined $db1;
@@ -2869,7 +2877,8 @@ die "no table on first connection" unless defined $t1 or defined $source1;
 my ($db2, $u2, $w2, $h2, $p2, $b2, $t2, $k2, $c2) = parse_conn(shift);
 
 die "unexpected auth in second URI under sqlite"
-  if $db2 eq 'sqlite' and (defined $u2 or defined $h2 or defined $p2);
+  if defined $db2 and $db2 eq 'sqlite' and
+    (defined $u2 or defined $h2 or defined $p2);
 
 # fix some default values for connection 2
 $db2 = $db1 unless defined $db2;
@@ -3328,7 +3337,7 @@ verb 1, "bulk delete: @{$bdel}" if defined $bdel and @$bdel;
 verb 1, "bulk insert: @{$bins}" if defined $bins and @$bins;
 
 my ($bic, $bdc, $insb, $delb) = (0, 0);
-if ((defined @$bins and @$bins) or (defined $bdel and @$bdel))
+if ((defined $bins and @$bins) or (defined $bdel and @$bdel))
 {
   verb 1, "resolving bulk inserts and deletes...";
   # this cost two full table-0 scans, one on each side...
