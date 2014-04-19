@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1485 2014-01-08 21:24:58Z coelho $
+# $Id: pg_comparator.pl 1494 2014-04-19 15:11:43Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -295,6 +295,14 @@ to request a cleanup. This option is useful for debugging.
 
 Default is to use temporary tables that are automatically wiped out when the
 connection is closed.
+
+=item C<--unlogged>, C<--no-unlogged>
+
+Use unlogged tables for storing checksums. These tables are not transactional,
+so it may speed up things a little. However, they are not automatically cleaned
+up at the end. See C<--clear> option to request a cleanup.
+
+Default is not to use unlogged tables.
 
 =item C<--threads> or C<-T>, C<--no-threads> or C<-N>
 
@@ -857,7 +865,8 @@ there is a lot of options the combination of which cannot all be tested.
 If the tables to compare are in the same database, a simple SQL
 query can extract the differences. Assuming Tables I<T1> and I<T2>
 with primary key I<id> and non null contents I<data>, then their
-differences is summarized by the following query:
+differences, that is how I<T1> differs from the reference I<T2>,
+is summarized by the following query:
 
 	SELECT COALESCE(T1.id, T2.id) AS key,
 	  CASE WHEN T1.id IS NULL THEN 'DELETE'
@@ -1090,6 +1099,13 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 =over 4
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
+
+Improved documentation.
+Add C<--unlogged> option to use unlogged tables.
+The I<release> validation was run successfully
+on PostgreSQL 9.3.4 and MySQL 5.5.35.
+
+=item B<version 2.2.2> (r1485 on 2014-01-08)
 
 Fix some warnings reported by I<Ivan Mincik>.
 Minor doc changes.
@@ -1345,18 +1361,18 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1485 $';
+my $revision = '$Revision: 1494 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
 
 # various option defaults
-my ($verb, $debug, $temp, $ask_pass, $factor, $clear) = (0, 0, 1, 0, 7, 0);
+my ($verb, $debug, $temp, $unlog, $ask_pass, $clear) = (0, 0, 1, 0, 0, 0);
 my ($max_ratio, $max_levels, $report, $threads, $async) =  (0.1, 0, 1, 0, 1);
 my ($cleanup, $size, $usekey, $usenull, $synchronize) = (0, 0, 0, 1, 0);
 my ($do_it, $do_trans, $prefix, $ckcmp) = (0, 1, 'pgc_cmp', 'create');
 my ($maskleft, $name, $key_size, $col_size, $where) = (1, 'none', 0, 0, '');
-my ($expect_warn) = (0);
+my ($factor, $expect_warn) = (7, 0);
 # condition, tests, max size of blobs, data sources...
 my ($expect, $longreadlen, $source1, $source2, $key_cs, $tup_cs, $do_lock,
     $env_pass, $max_report, $stats);
@@ -1619,8 +1635,9 @@ my %M = (
     'attrs' => {},
     # sql-comparison which is null-safe
     'safeeq' => ' IS NOT DISTINCT FROM ?',
-    # sql temporary table
+    # sql temporary or unlogged table
     'temporary' => 'TEMPORARY ',
+    'unlogged' => 'UNLOGGED ',
     # sql drop table
     'drop_table' => 'DROP TABLE IF EXISTS',
     # actual aggregates to use
@@ -1692,6 +1709,7 @@ my %M = (
     'attrs' => {},
     'safeeq' => '<=>?',
     'temporary' => 'TEMPORARY ',
+    'unlogged' => '', # mysql myisam is always unlogged?
     'drop_table' => 'DROP TABLE IF EXISTS',
     'xor' => 'BIT_XOR',
     'sum' => 'SUM',
@@ -1741,6 +1759,7 @@ my %M = (
     'attrs' => {},
     'safeeq' => '=?', # ???
     'temporary' => 'TEMPORARY ',
+    'unlogged' => 'TEMPORARY ',
     'drop_table' => 'DROP TABLE IF EXISTS',
     'xor' => 'XOR',
     'sum' => 'ISUM',# work around 'SUM' and 'TOTAL' overflow handling
@@ -1810,6 +1829,7 @@ my %M = (
     'attrs' => {},
     'safeeq' => ' IS NOT DISTINCT FROM ?',
     'temporary' => 'GLOBAL TEMPORARY ', # not dropped...
+    'unlogged' => '', # ???
     'drop_table' => 'DROP TABLE',
     'xor' => '???',
     'sum' => 'SUM', # ??? too clever, detects integer overflows
@@ -2364,7 +2384,8 @@ sub build_cs_table($$$$$$$$)
   {
     $count =
       sql_do($dbh, $db,
-	     "CREATE " . ($temp? $M{$db}{temporary}:'') .
+	     "CREATE " .
+	     ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
 	     "TABLE ${name}0 AS $build_checksum");
     # count should be available somewhere,
     # but alas does not seem to be returned by do("CREATE TABLE ... AS ... ")
@@ -2373,7 +2394,9 @@ sub build_cs_table($$$$$$$$)
   elsif ($ckcmp eq 'insert' or not $M{$db}{create_as})
   {
     sql_do($dbh, $db,
-	   "CREATE ". ($temp? $M{$db}{temporary}: '')."TABLE ${name}0 (".
+	   "CREATE ".
+	   ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
+	   "TABLE ${name}0 (".
 	   # KEY CHECKSUM NN?
 	   'kcs ' .
        ($usekey? col_type($dbh, $dhpbt, $db, "@$pkeys"): $M{$db}{cktype}{4}) .
@@ -2462,7 +2485,9 @@ sub compute_summary($$$$$$@)
   }
   # create summary table
   my $create_table =
-    "CREATE " . ($temp? $M{$db}{temporary}:'') . "TABLE ${name}${level}";
+    "CREATE " .
+    ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
+    "TABLE ${name}${level}";
   # summary table contents
   my $select = "SELECT " .
                  &{$M{$db}{andop}}($kcs, $masks[$level]) . " AS kcs, " .
@@ -2482,7 +2507,7 @@ sub compute_summary($$$$$$@)
 }
 
 # compute_summaries($dbh, $name, @masks)
-# globals: $verb $temp $agg $cleanup
+# globals: $verb $temp $unlog $agg $cleanup
 sub compute_summaries($$$$$@)
 {
   my ($dbh, $db, $name, $table, $skey, @masks) = @_;
@@ -2792,6 +2817,7 @@ GetOptions(
   },
   # auxiliary tables
   "temporary|temp|tmp|t!" => \$temp,
+  "unlogged|unlog|U!" => \$unlog,
   "cleanup!" => \$cleanup,
   "clear!" => \$clear,
   "prefix|p=s" => \$prefix,
@@ -2830,6 +2856,9 @@ $do_lock = $synchronize if not defined $do_lock;
 
 # handle stats option
 $stats = 'txt' if defined $stats and $stats eq '';
+
+die "--temporary and --unlogged are exclusive"
+  if $temp and $unlog;
 
 die "invalid value for stats option: $stats  for 'txt' or 'csv'"
   unless not defined $stats or $stats =~ /^(csv|txt)$/;

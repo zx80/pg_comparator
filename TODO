@@ -6,7 +6,9 @@
 * distribution
 - use EXTENSION framework?
 - integrate to pgxn?
-- add test.mk & scripts?
+- export working test infrastructure
+  add test.mk & scripts? also setup databases
+- debian packaging?
 
 * asynchronous queries
 - could push statements from lists..

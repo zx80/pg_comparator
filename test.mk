@@ -1,5 +1,5 @@
 #
-# $Id: test.mk 1473 2013-03-07 20:41:38Z coelho $
+# $Id: test.mk 1493 2014-04-19 15:11:11Z coelho $
 #
 # run pg_comparator validation checks
 #
@@ -189,8 +189,8 @@ fast:
 	$(MAKE) CF=$(ck)  CS=4 AGG=$(sum) NULL=$(hash) FOLD=4 KEYS=1 COLS=0 pgcopts+=' --no-lock' run
 	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(hash) FOLD=4 KEYS=1 COLS=3 pgcopts+=' --size=$(ROWS)' run
 	$(MAKE) CF=$(md5) CS=8 AGG=$(xor) NULL=$(text) FOLD=5 KEYS=1 COLS=1 pgcopts+=' --cc=insert' run
-	$(MAKE) CF=$(ck)  CS=4 AGG=$(xor) NULL=$(hash) FOLD=7 KEYS=2 COLS=3 run
-	$(MAKE) CF=$(ck)  CS=8 AGG=$(xor) NULL=$(text) FOLD=6 KEYS=1 COLS=2 run
+	$(MAKE) CF=$(ck)  CS=4 AGG=$(xor) NULL=$(hash) FOLD=7 KEYS=2 COLS=3 pgcopts+=' --no-temporary --unlogged --cleanup' run
+	$(MAKE) CF=$(ck)  CS=8 AGG=$(xor) NULL=$(text) FOLD=6 KEYS=1 COLS=2 pgcopts+=' --no-temporary --cleanup' run
 	$(MAKE) CF=$(ck)  CS=8 AGG=$(xor) NULL=$(hash) FOLD=8 KEYS=2 COLS=3 run
 
 # this is scripted rather than relying on dependencies
