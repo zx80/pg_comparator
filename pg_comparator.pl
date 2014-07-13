@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1494 2014-04-19 15:11:43Z coelho $
+# $Id: pg_comparator.pl 1506 2014-07-13 14:35:27Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -227,6 +227,11 @@ Default is B<text> because it is faster.
 
 Show option summary.
 
+=item C<--pg-copy=128>
+
+Experimental option to use PostgreSQL's COPY instead of INSERT/UPDATE
+when synchronizing, by chunks of the specified size.
+
 =item C<--prefix='pgc_cmp'>
 
 Name prefix, possibly schema qualified, used for generated comparison tables
@@ -282,8 +287,8 @@ synchronizations and is not necessarily interesting to the user.
 =item C<--synchronize> or C<-S>
 
 Actually perform operations to synchronize the second table wrt the first.
-Well, not really. It is only done if you add C<--do-it> or C<-D>.
-Save your data before attempting anything like that!
+Well, not really, it is only a dry run. It is actually done if you add
+C<--do-it> or C<-D>. Save your data before attempting anything like that!
 
 Default is not to synchronize.
 
@@ -1024,11 +1029,12 @@ Run 12 tests similar to the previous one with varrying options (number of
 key columns, number of value columns, aggregate function, checksum function,
 null handling, folding factor, table locking or not...).
 
-=item I<feature> - about 5 minutes & 168 or 474 runs
+=item I<feature> - about 5 minutes & 171 or 477 runs
 
 Test various features:
 I<cc> for checksum computation strategies,
 I<auto> for trigger-maintained checksums on PostgreSQL,
+I<pgcopy> for PostgreSQL copy test,
 I<empty> for corner cases with empty tables,
 I<quote> for table quoting,
 I<engine> for InnoDB vs MyISAM MySQL backends,
@@ -1038,7 +1044,7 @@ I<sqlite> for SQLite test,
 I<mylite> for SQLite/MySQL mixed mode with some restrictions,
 I<pglite> for SQLite/PostgreSQL mixed mode with some restrictions.
 
-=item I<release> - about 20 minutes & 938 runs
+=item I<release> - about 20 minutes & 944 runs
 
 This is I<feature> with two table sizes, I<fast>, and I<collisions>
 to test possible hash collisions.
@@ -1091,6 +1097,11 @@ the documentation is 50% of this script.
 Mixed SQLite vs PostgreSQL or MySQL table comparison may not work properly in
 all cases, because of SQLite dynamic type handling and reduced capabilities.
 
+The script creates (temporary) tables on both sides for comparing the target
+tables: this imply that you must be allowed to do that for the comparison...
+However, read-only replicas do not allow creating objects, which mean that you
+cannot use pg_comparator to compare table contents on a synchronized replica.
+
 =head1 VERSIONS
 
 See L<PG Foundry|http://pgfoundry.org/projects/pg-comparator/> for the latest
@@ -1099,6 +1110,15 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 =over 4
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
+
+Add experimental support for using COPY instead of INSERT/UPDATE for PostgreSQL,
+in chunks of size specified with option C<--pg-copy>,
+as suggested by I<Graeme Bell>.
+Minor fix when computing the maximum number of differences to report.
+The I<release> validation was run successfully
+on PostgreSQL 9.4b1 and MySQL 5.5.37.
+
+=item B<version 2.2.3> (r1494 on 2014-04-19)
 
 Improved documentation.
 Add C<--unlogged> option to use unlogged tables.
@@ -1361,7 +1381,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1494 $';
+my $revision = '$Revision: 1506 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1375,7 +1395,7 @@ my ($maskleft, $name, $key_size, $col_size, $where) = (1, 'none', 0, 0, '');
 my ($factor, $expect_warn) = (7, 0);
 # condition, tests, max size of blobs, data sources...
 my ($expect, $longreadlen, $source1, $source2, $key_cs, $tup_cs, $do_lock,
-    $env_pass, $max_report, $stats);
+    $env_pass, $max_report, $stats, $pg_copy);
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
@@ -2844,7 +2864,8 @@ GetOptions(
   "stats-name=s" => \$name, # name of test
   # misc
   "long-read-len|lrl|L=i" => \$longreadlen,
-  "version|V" => sub { print "$0 version is $script_version\n"; exit 0; }
+  "version|V" => sub { print "$0 version is $script_version\n"; exit 0; },
+  "pg-copy:i" => \$pg_copy
 ) or die "$! (try $0 --help)";
 
 # propagate expect specification
@@ -2877,6 +2898,9 @@ die "data source 2 must be a DBI connection string: $source2"
 # fix factor size
 $factor = 1 if $factor<1;
 $factor = 30 if $factor>30;
+
+# use pg_copy if possible, currently for inserts
+$pg_copy = 128 if defined $pg_copy and ($pg_copy eq '' or $pg_copy eq '0');
 
 # intermediate table names
 # what about putting the table name as well?
@@ -2913,6 +2937,7 @@ die "unexpected auth in second URI under sqlite"
 $db2 = $db1 unless defined $db2;
 $u2 = $u1 unless defined $u2;
 $h2 = 'localhost' unless defined $h2;
+# hmmm.... should it reuse $p2 instead?
 $p2 = $M{$db2}{port} if not defined $p2 and exists $M{$db2}{port};
 $b2 = $b1 unless defined $b2;
 $t2 = $t1 unless defined $t2;
@@ -2958,9 +2983,19 @@ if ($ask_pass and not defined $w2)
   $w2 = Term::ReadPassword::read_password('connection 2 password> ');
 }
 
-# some sanity checks, that are skipped under debugging so as to test
+# some sanity checks
+die "sorry, --pg-copy option requires connections to postgresql"
+  if defined $pg_copy and ($db1 ne 'pgsql' or $db2 ne 'pgsql');
+
+die "--pg_copy must be strictly positive, got '$pg_copy'"
+  if defined $pg_copy and $pg_copy <= 0;
+
+# sanity check skipped under debugging so as to test
 die "sorry, threading does not seem to work with PostgreSQL driver"
   if not $debug and $threads and ($db1 eq 'pgsql' or $db2 eq 'pgsql');
+
+die "sorry, --pg-copy currently requires --no-async"
+  if not $debug and defined $pg_copy and $async;
 
 # fix some settings for SQLite
 if (not $debug and ($db1 eq 'sqlite' or $db2 eq 'sqlite'))
@@ -3282,7 +3317,8 @@ $count1 = $count2 = $size if $size;
 $size = $count1>$count2? $count1: $count2; # MAX size of both tables
 
 # stop at this number of differences
-$max_report = $max_ratio * $size unless defined $max_report;
+$max_report = $max_ratio * $size
+  unless defined $max_report or $expect_warn and defined $expect;
 
 # can we already stop now?
 my $min_diff = abs($count2-$count1);
@@ -3461,82 +3497,109 @@ if ($synchronize and
   my $where_k2 = is_equal($dbh2, $dhpbt2, $db2, $k2);
   my $set_c2 = (join '=?, ', @$c2) . '=?';
 
-  # delete rows
-  if (@$del or @$delb)
+  # DELETE rows, including updates with copy
+  if (@$del or @$delb or ($pg_copy and @$upt))
   {
     my $del_sql = "DELETE FROM $t2 WHERE " .
 	($where? "($where) AND ": '') . $where_k2;
     verb 2, $del_sql;
     my $del_sth = $dbh2->prepare($del_sql) if $do_it;
-    for my $d (@$del, @$delb) {
+    for my $d (@$del, @$delb, $pg_copy? @$upt: ()) {
       sth_param_exec($do_it, "DELETE $t2", $del_sth, $d);
     }
     # undef $del_sth;
   }
 
-  # get values for insert or update
-  my ($val_sql, $val_sth);
-  if ($c1 and @$c1)
-  {
-    $val_sql = "SELECT " . join(',', @$c1) . " FROM $t1 WHERE " .
-               ($where? "($where) AND ": '') . $where_k1;
-    verb 2, $val_sql;
-    $val_sth = $dbh1->prepare($val_sql)
-      if @$ins or @$insb or @$upt;
+  # insert/update rows
+  # note: I could skip fetching if there is no data column
+  if ($pg_copy and (@$ins or @$upt or defined $insb)) { # use COPY
+    sql_do($dbh2, $db2, "COPY $t2(" . join(',', @$k2, @$c2) . ") FROM STDIN");
+    #async_wait($dbh2, $db2, 'copy from 2') if $async;
+    my $select = "SELECT " . join(',', @$k1, @$c1) . " FROM $t1 WHERE ";
+    $select .= "$where AND " if $where;
+    $select .= "(" . join(',', @$k1) . ") IN (";
+    # we COPY both inserts and updates
+    my @allins = (@$ins, @$insb, @$upt);
+    while (@allins) {
+      my $bulk = '';
+      for my $k (splice(@allins, 0, $pg_copy)) { # chunked
+	$bulk .= ',' if $bulk;
+	#$copy_bulk .= $dbh1->quote($k);
+	$bulk .= "(@$k)";
+	$query_data++;
+      }
+      sql_do($dbh1, $db1, "COPY ($select$bulk)) TO STDOUT");
+      #async_wait($dbh1, $db1, 'copy to 1') if $async;
+      my $row = '';
+      while (($dbh1->pg_getcopydata($row)) != -1) {
+	$dbh2->pg_putcopydata($row) if $do_it;
+      }
+    }
+    $dbh2->pg_putcopyend();
   }
+  else { # use generic INSERT/UPDATE
 
-  # insert rows
-  if (@$ins or @$insb)
-  {
-    my $ins_sql = "INSERT INTO $t2(" .
-	(@$c2? join(',', @$c2) . ',': '') . join(',', @$k2) . ') ' .
-	'VALUES(?' . ',?' x (@$k2+@$c2-1) . ')';
-    verb 2, $ins_sql;
-    my $ins_sth = $dbh2->prepare($ins_sql) if $do_it;
-    for my $i (@$ins, @$insb)
+    # get values for insert or update
+    my ($val_sql, $val_sth);
+    if ($c1 and @$c1)
     {
-      $query_data++;
-      my @c1values = ();
-      # query the other column values for key $i
-      if ($c1 and @$c1)
+      $val_sql = "SELECT " . join(',', @$c1) . " FROM $t1 WHERE " .
+      ($where? "($where) AND ": '') . $where_k1;
+      verb 2, $val_sql;
+      $val_sth = $dbh1->prepare($val_sql)
+      if @$ins or @$insb or @$upt;
+    }
+
+    # handle inserts
+    if (@$ins or @$insb)
+    {
+      my $ins_sql = "INSERT INTO $t2(" . join(',', @$c2, @$k2) . ") " .
+	'VALUES(?' . ',?' x (@$k2+@$c2-1) . ')';
+      verb 2, $ins_sql;
+      my $ins_sth = $dbh2->prepare($ins_sql) if $do_it;
+      for my $i (@$ins, @$insb) {
+	$query_data++;
+	my @c1values = ();
+	# query the other column values for key $i
+	if ($c1 and @$c1) {
+	  sth_param_exec(1, "SELECT $t1", $val_sth, $i);
+	  @c1values = $val_sth->fetchrow_array();
+	  # hmmm... may be raised on blobs?
+	  die "unexpected values fetched for insert"
+	    unless @c1values and @c1values == @$c1;
+
+	  &{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
+	}
+	# then insert the missing tuple
+	sth_param_exec($do_it, "INSERT $t2", $ins_sth, $i, @c1values);
+      }
+      #  $ins_sth
+    }
+
+    # handle updates
+    if (@$upt)
+    {
+      die "there must be some columns to update" unless $c1;
+      my $upt_sql = "UPDATE $t2 SET $set_c2 WHERE " .
+      ($where? "($where) AND ": '') . $where_k2;
+      verb 2, $upt_sql;
+      my $upt_sth = $dbh2->prepare($upt_sql) if $do_it;
+      for my $u (@$upt)
       {
-	sth_param_exec(1, "SELECT $t1", $val_sth, $i);
-	@c1values = $val_sth->fetchrow_array();
+	$query_data++;
+	# get value for key $u
+	sth_param_exec(1, "SELECT $t1", $val_sth, $u);
+	my @c1values = $val_sth->fetchrow_array();
 	# hmmm... may be raised on blobs?
-	die "unexpected values fetched for insert"
-	  unless @c1values and @c1values == @$c1;
+	die "unexpected values fetched for update"
+        unless @c1values and @c1values == @$c1;
+	# use it to update the other table
+	sth_param_exec($do_it, "UPDATE $t2", $upt_sth, $u, @c1values);
 
 	&{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
       }
-      # then insert the missing tuple
-      sth_param_exec($do_it, "INSERT $t2", $ins_sth, $i, @c1values);
+      # $upt_sth
     }
-    #  $ins_sth
-  }
-
-  # update rows
-  if (@$upt)
-  {
-    die "there must be some columns to update" unless $c1;
-    my $upt_sql = "UPDATE $t2 SET $set_c2 WHERE " .
-	($where? "($where) AND ": '') . $where_k2;
-    verb 2, $upt_sql;
-    my $upt_sth = $dbh2->prepare($upt_sql) if $do_it;
-    for my $u (@$upt)
-    {
-      $query_data++;
-      # get value for key $u
-      sth_param_exec(1, "SELECT $t1", $val_sth, $u);
-      my @c1values = $val_sth->fetchrow_array();
-      # hmmm... may be raised on blobs?
-      die "unexpected values fetched for update"
-        unless @c1values and @c1values == @$c1;
-      # use it to update the other table
-      sth_param_exec($do_it, "UPDATE $t2", $upt_sth, $u, @c1values);
-
-      &{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
-    }
-    # $upt_sth
   }
 
   # close synchronization transaction if any
@@ -3644,6 +3707,7 @@ if (defined $stats)
 
   # build options as a bit vector
   my $options =
+      (($pg_copy?1:0) << 11) |  # --pg-copy=...
       (($tup_cs?1:0) << 10) |   # --tuple-checksum=...
       (($key_cs?1:0) << 9) |    # --key-checksum=...
       ($do_lock << 8) |         # --lock

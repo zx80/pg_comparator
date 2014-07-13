@@ -1,5 +1,5 @@
 #
-# $Id: test.mk 1493 2014-04-19 15:11:11Z coelho $
+# $Id: test.mk 1503 2014-07-13 13:39:05Z coelho $
 #
 # run pg_comparator validation checks
 #
@@ -194,7 +194,7 @@ fast:
 	$(MAKE) CF=$(ck)  CS=8 AGG=$(xor) NULL=$(hash) FOLD=8 KEYS=2 COLS=3 run
 
 # this is scripted rather than relying on dependencies
-# so that the error messages are clearer
+# so that error messages are clearer
 .PHONY: fast_pg fast_my fast_mix fast_lite
 fast_pg: fast
 fast_my: fast
@@ -330,7 +330,7 @@ validate_full:
 ############################################################ FEATURE VALIDATION
 
 # tests some options without setting rows
-# 60+18+90 = 168
+# 60+18+90+3 = 171
 # 18+36+36+36+24+96+60 = 306
 .PHONY: validate_feature
 validate_feature:
@@ -338,6 +338,7 @@ validate_feature:
 	$(MAKE) validate_cc
 	$(MAKE) validate_auto # pgsql only
 	$(MAKE) validate_empty
+	$(MAKE) validate_pgcopy # pgsql only
 	[ $(ROWS) = 10 ] && $(MAKE) validate_quote || exit 0
 	[ $(ROWS) = 10 ] && $(MAKE) validate_sqlite || exit 0 # sqlite only
 	[ $(ROWS) = 10 ] && $(MAKE) validate_mylite || exit 0 # partial
@@ -385,6 +386,14 @@ validate_empty:
 	$(MAKE) crtopts+=' --e1 --e2' TOTAL=0       validate
 	$(MAKE) crtopts+=' --e1'      TOTAL=$(ROWS) validate
 	$(MAKE) crtopts+=' --e2'      TOTAL=$(ROWS) validate
+	@echo "# $@ done"
+
+# pgcopy option
+.PHONY: validate_pgcopy
+validate_pgcopy:
+	@echo "# $@ start"
+	$(MAKE) AUTH1=$(auth1) AUTH2=$(auth1) \
+	  pgcopts+='--pg-copy --no-async' sanity_pg
 	@echo "# $@ done"
 
 # some options may not work as expected depending on the engine...

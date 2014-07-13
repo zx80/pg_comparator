@@ -1,9 +1,9 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 1454 2012-11-01 19:57:05Z fabien $
+# $Id: test_pg_comparator.sh 1499 2014-07-12 18:03:30Z coelho $
 #
 # ./test_pg_comparator.sh -r 100 \
-#    -a fabien:mypassword@localhost -- \
+#    -a fabien:mypassword@localhost:port -- \
 #    --synchronize --stats --do-it
 
 PATH=$PATH:.
@@ -50,7 +50,7 @@ while [[ "$1" && "$1" != '--' ]] ; do
     --empty-1|--e1) empty1=1 ;;
     --empty-2|--e2) empty2=1 ;;
     # diffs
-    --total|-t) total=$1 ; shift ;;
+    --total|-t) total=$1 ins=0 upt=0 del=0 ; shift ;;
     --update|--upd|-u) upt=$1 ; shift ;;
     --insert|--ins|-i) ins=$1 ; shift ;;
     --delete|--del|-d) del=$1 ; shift ;;
@@ -95,12 +95,13 @@ done
 if [ "$total" ] ; then
   if [ $ncol -eq 0 ] ; then
     # fix if key only, no updates!
-    ins=$(($total/2))
+    [ $ins -eq 0 ] && ins=$(($total/2))
     nul=0 upt=0 rev=0
     del=$(($total-$ins))
   else
-    ins=$(($total/4))
-    del=$ins nul=$ins rev=0
+    [ $ins -eq 0 ] && ins=$(($total/4))
+    rem=$(($total-$ins))
+    del=$(($rem/2)) nul=$del rev=0
     [ "$notnull" ] && nul=0
     upt=$(($total - $ins - $del - 2 * $rev - $nul))
   fi
@@ -255,11 +256,16 @@ function change_table()
   return 0
 }
 
-# pgsql://calvin:hobbes@[host]
+# pgsql://calvin:hobbes@[host[:port]]
 function parse_conn()
 {
   local auth=$1 base=$2
+  local port=5432
   local host=${1//*@/}
+  if [[ $host == *:* ]] ; then
+    port=${host//*:}
+    host=${host//:*}
+  fi
   local user=${1//*:\/\//}
   user=${user//:*/}
   local pass=${1//@*/}
@@ -267,14 +273,14 @@ function parse_conn()
   if [[ $auth == pgsql://* ]]
   then
     if [ "$host" ] ; then
-      echo "psql 'host=$host user=$user password=$pass dbname=$base'"
+      echo "psql 'host=$host port=$port user=$user password=$pass dbname=$base'"
     else
       echo "psql 'user=$user password=$pass dbname=$base'"
     fi
   elif [[ $auth == mysql://* ]]
   then
     if [ "$host" ] ; then
-      echo "mysql --host=$host --user=$user --pass=$pass --database=$base"
+      echo "mysql --host=$host --port=$port --user=$user --pass=$pass --database=$base"
     else
       echo "mysql --user=$user --pass=$pass --database=$base"
     fi
