@@ -3,12 +3,13 @@
 - libdbd-sybase-perl: Sybase & MS SQL server
 - others?
 
-* table hash utility
+* table hash utility?
 - for read-only replica...
 
 * read-only version?
 - use WITH?
 - use RECURSIVE?
+- use UNLOGGED/TEMPORARY?
 
 * distribution
 - use EXTENSION framework?

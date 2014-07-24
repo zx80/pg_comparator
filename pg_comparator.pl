@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1506 2014-07-13 14:35:27Z coelho $
+# $Id: pg_comparator.pl 1512 2014-07-24 08:21:31Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -191,7 +191,7 @@ Show manual page interactively in the terminal.
 
 Maximum relative search effort. The search is stopped if the number of results
 is above this threshold expressed relatively to the table size.
-Use 2.0 for no limit (all tuples were deleted and new one are inserted).
+Use 2.0 for no limit (all tuples were deleted and new ones are inserted).
 
 Default is B<0.1>, i.e. an overall 10% difference is allowed before giving up.
 
@@ -203,7 +203,7 @@ option is ignored, otherwise the effort is computed with the ratio once
 the table size is known.
 
 Default is to compute the maximum number of reported differences based on
-the C<--max-ratio> option.
+the C<--max-ratio> option, with a mimimum of 100 differences allowed.
 
 =item C<--max-levels=0>
 
@@ -399,6 +399,7 @@ See the EXAMPLES section bellow, and also the C<--source-*> options above.
 Note that some default value used by DBI drivers may be changed with
 driver-specific environment variables, and that DBI also provides its own
 defaults and overrides, so what actually happens may not always be clear.
+Default values for the second URL are mostly taken from the first URL.
 
 =over 4
 
@@ -1111,6 +1112,18 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
+Fix broken URL defaults to use UNIX sockets with an empty host name,
+per report by I<Ivan Mincik>.
+Fix C<--where> condition handling with C<--pg-copy> in corner cases.
+Do not take execution timestamps when not required.
+Allow a larger number of differences by default for small table comparisons.
+Add more sanity checks.
+Improve some error messages.
+The I<release> validation was run successfully
+on PostgreSQL 9.4b1 and MySQL 5.5.38.
+
+=item B<version 2.2.4> (r1506 on 2014-07-13)
+
 Add experimental support for using COPY instead of INSERT/UPDATE for PostgreSQL,
 in chunks of size specified with option C<--pg-copy>,
 as suggested by I<Graeme Bell>.
@@ -1381,7 +1394,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1506 $';
+my $revision = '$Revision: 1512 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1914,16 +1927,14 @@ sub parse_conn($)
   my ($db, $user, $pass, $host, $port, $base, $tabl, $keys, $cols);
 
   # get driver name
-  if ($c =~ /^(pg|my)(sql)?:\/\//) {
-    $db = $1 . 'sql';
-  }
-  elsif ($c =~ /^(sqlite|firebird):\/\//) {
+  if ($c =~ /^(\w+):\/\//) {
     $db = $1;
+    $db .= 'sql' if $db eq 'pg' or $db eq 'my'; # allow pg & my for pgsql & mysql
+    $c =~ s/^\w+:\/\///; # remove driver part
   }
   else {
-    verb 2, "no driver found in URL: $c" if $debug;
+    verb 2, "no driver in URL: $c" if $debug;
   }
-  $c =~ s/^\w+:\/\///;
 
   # split authority and path on first '/'
   die "invalid connection string '$c', must contain '\/'\n"
@@ -1931,27 +1942,25 @@ sub parse_conn($)
 
   my ($auth, $path) = ($1, $2);
 
-  if ("$auth")
-  {
+  if ("$auth") {
     # parse authority if non empty. ??? url-translation?
     die "invalid authority string '$auth'\n"
       unless $auth =~ /^((\w+)         # login
 			 (:([^.]*)     # :password
-			  )?\@)?       # @
+			  )?\@)?       # @ => auth string is before
 		       ([^\@:\/]*)     # host
 		       (:(\d+))?$      # :port
 		      /x;
 
     $user=$2 if defined $1;
     $pass=$4 if defined $3;
-    $host=$5; # may be empty, but must be defined!
+    $host=$5; # may be empty, but is always defined *if* there is a non empty auth
     $port=$7 if defined $6;
     verb 3, "user=$user pass=$pass host=$host port=" . defined $port? $port: '?'
       if $debug;
   }
 
-  if ("$path")
-  {
+  if ("$path") {
     my $kc_str;
 
     if (defined $db and ($db eq 'sqlite' or $db eq 'firebird')) {
@@ -1959,7 +1968,7 @@ sub parse_conn($)
       # if so, the last "/" is mandatory to mark the table name
       die "invalid path string '$path'\n"
         unless $path =~ /
-	  ^((.*)                    # base file path
+	  ^((.*)                    # base file (longest) path
 	    \/(\w+|\"[^\"+]\")?)?   # table
 	  (\?(.+))?                 # key,part:column,list...
 	/x;
@@ -2919,10 +2928,11 @@ die "unexpected auth in first URI under sqlite"
 # set defaults and check minimum definitions.
 $db1 = 'pgsql' unless defined $db1;
 $u1 = $ENV{USER} unless defined $u1;
-$h1 = 'localhost' unless defined $h1;
+$h1 = '' unless defined $h1; # defaults to Unix socket
 $p1 = $M{$db1}{port} if not defined $p1 and exists $M{$db1}{port};
+# k/c defaults set later
 
-# these are necessary
+# these are obviously necessary:-)
 die "no base on first connection" unless defined $b1 or defined $source1;
 die "no table on first connection" unless defined $t1 or defined $source1;
 
@@ -2933,14 +2943,16 @@ die "unexpected auth in second URI under sqlite"
   if defined $db2 and $db2 eq 'sqlite' and
     (defined $u2 or defined $h2 or defined $p2);
 
-# fix some default values for connection 2
+# default values for connection 2 is mostly to reuse from connection 1
 $db2 = $db1 unless defined $db2;
 $u2 = $u1 unless defined $u2;
-$h2 = 'localhost' unless defined $h2;
-# hmmm.... should it reuse $p2 instead?
-$p2 = $M{$db2}{port} if not defined $p2 and exists $M{$db2}{port};
+$h2 = $h1 unless defined $h2;
+# same as fist iff same driver, or driver default
+$p2 = ($db2 eq $db1)? $p1: $M{$db2}{port}
+  unless defined $p2 and exists $M{$db2}{port};
 $b2 = $b1 unless defined $b2;
 $t2 = $t1 unless defined $t2;
+# k/c defaults set later
 
 die "null should be 'text' or 'hash', got $null"
   unless $null =~ /^(text|hash)$/i;
@@ -2955,13 +2967,11 @@ die "aggregate must be 'xor' or 'sum', got ($agg)"
   unless $agg =~ /^(xor|sum)$/i;
 
 # database connection...
-if (defined $env_pass and not defined $w1)
-{
+if (defined $env_pass and not defined $w1) {
   $w1 = $ENV{"${env_pass}1"};
   $w1 = $ENV{$env_pass} unless defined $w1;
 }
-if ($ask_pass and not defined $w1)
-{
+if ($ask_pass and not defined $w1) {
   require Term::ReadPassword;
   $w1 = Term::ReadPassword::read_password('connection 1 password> ');
 }
@@ -2972,13 +2982,11 @@ if ($ask_pass and not defined $w1)
 
 $w2 = $w1 unless $w2 or not $w1 or $u1 ne $u2 or $h1 ne $h2 or $p1 ne $p2;
 
-if (defined $env_pass and not defined $w2)
-{
+if (defined $env_pass and not defined $w2) {
   $w2 = $ENV{"${env_pass}2"};
   $w2 = $ENV{$env_pass} unless defined $w2;
 }
-if ($ask_pass and not defined $w2)
-{
+if ($ask_pass and not defined $w2) {
   require Term::ReadPassword;
   $w2 = Term::ReadPassword::read_password('connection 2 password> ');
 }
@@ -3184,25 +3192,27 @@ else
 		       !$synchronize);
 }
 
-# set defaults...
-if (not defined $k1)
-{
+# get/set k/c defaults once connected
+if (not defined $k1) {
   $k1 = [get_table_pkey($dbh1, $db1, $b1, $t1)];
   warn "default key & attribute on first connection but not on second..."
     if defined $k2;
+  die "no primary key found on first connection table $t1" unless @$k1;
 }
-if (not defined $c1)
-{
+if (not defined $c1) {
   $c1 = [get_table_attributes($dbh1, $db1, $b1, $t1, @$k1)];
   # warn, as this may lead to unexpected results...
   warn "default attributes on first connection but not on second..."
     if defined $c2;
 }
 
+# fix second connection default
 $k2 = $k1 unless defined $k2;
 $c2 = $c1 unless defined $c2;
 
 # some sanity checks
+die "empty key on first connection, must specify one" unless @$k1;
+die "empty key on second connection, must specify one" unless @$k2;
 die "key number of attributes does not match" unless @$k1 == @$k2;
 die "column number of attributes does not match" unless @$c1 == @$c2;
 
@@ -3317,12 +3327,16 @@ $count1 = $count2 = $size if $size;
 $size = $count1>$count2? $count1: $count2; # MAX size of both tables
 
 # stop at this number of differences
-$max_report = $max_ratio * $size
-  unless defined $max_report or $expect_warn and defined $expect;
+if (not (defined $max_report or $expect_warn and defined $expect)) {
+  $max_report = int($max_ratio * $size);
+  # bee cool with small stuff...
+  $max_report = 100 if $max_report < 100;
+}
 
 # can we already stop now?
 my $min_diff = abs($count2-$count1);
-die "too many differences, at least $min_diff > $max_report"
+die "too many differences, at least $min_diff > $max_report, " .
+    "consider raising --max-ratio or --max-report"
   if defined $max_report and $min_diff>$max_report;
 
 # compute initial "full" masks which must be larger than size
@@ -3516,7 +3530,7 @@ if ($synchronize and
     sql_do($dbh2, $db2, "COPY $t2(" . join(',', @$k2, @$c2) . ") FROM STDIN");
     #async_wait($dbh2, $db2, 'copy from 2') if $async;
     my $select = "SELECT " . join(',', @$k1, @$c1) . " FROM $t1 WHERE ";
-    $select .= "$where AND " if $where;
+    $select .= "($where) AND " if $where;
     $select .= "(" . join(',', @$k1) . ") IN (";
     # we COPY both inserts and updates
     my @allins = (@$ins, @$insb, @$upt);
@@ -3620,7 +3634,7 @@ if ($synchronize and
       unless $do_it;
 }
 
-$tsyn = [gettimeofday];
+$tsyn = [gettimeofday] if $stats;
 
 if ($clear)
 {
@@ -3643,7 +3657,7 @@ if ($clear)
   verb 4, "clearing done."
 }
 
-$tclr = [gettimeofday];
+$tclr = [gettimeofday] if $stats;
 
 # recreate database handler for the end...
 dbh_materialize($dbh1, $db1);
@@ -3670,7 +3684,7 @@ if ($do_trans)
 }
 
 # final timestamp
-$tend = [gettimeofday];
+$tend = [gettimeofday] if $stats;
 
 # some stats are collected out of time measures
 if ($stats)

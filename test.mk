@@ -1,5 +1,5 @@
 #
-# $Id: test.mk 1503 2014-07-13 13:39:05Z coelho $
+# $Id: test.mk 1510 2014-07-24 06:31:50Z coelho $
 #
 # run pg_comparator validation checks
 #
@@ -90,12 +90,17 @@ RUNOPS	= -C -M -K
 crtopts =
 CRTOPTS	=
 
+LOG	= .log
+
 #
 # test generation, then comparison & synchronization & check
 #
 # make AUTH=calvin:hobbes@home DB=calvin COLS=0 ROWS=1000 run
 .PHONY: run
 run: pg_comparator
+	@echo run 1=$(AUTH1) 2=$(AUTH2) $(KEYS)+$(COLS) $(ROWS)x$(WIDTH) \
+	  $(TOTAL) $(FOLD) $(CF) $(AGG) $(CS) $(NULL) $(pgcopts) $(PGCOPTS) \
+	  >> $(LOG)
 	./test_pg_comparator.sh \
 	  -1 $(AUTH1) -2 $(AUTH2) -b1 $(DB1) -b2 $(DB2) \
 	  -k $(KEYS) -c $(COLS) -r $(ROWS) -w $(WIDTH) \
@@ -111,6 +116,11 @@ run: pg_comparator
 	    --null=$(NULL) -e 0 --no-report $(pgcopts) $(PGCOPTS) \
 		'$(CONN1)' '$(CONN2)'
 	$(PG_POST)
+
+.PHONY: clean-test
+clean: clean-test
+clean-test:
+	$(RM) $(LOG)
 
 ########################################################################## FULL
 #
