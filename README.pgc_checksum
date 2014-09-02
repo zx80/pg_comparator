@@ -1,5 +1,7 @@
 provide fast NOT cryptographycally-secure checksum functions
 for TEXT, results being of INT2, INT4 and INT8 types.
+The cksum* functions are based on Jenkins hash.
+The fnv* functions are based on FNV version 1a hash.
 
 load with:
 
@@ -10,6 +12,9 @@ use as:
 	psql> SELECT cksum2('some text');
 	psql> SELECT cksum4('some text');
 	psql> SELECT cksum8('some text');
+	psql> SELECT fnv2('some text');
+	psql> SELECT fnv4('some text');
+	psql> SELECT fnv8('some text');
 
-An empty text results in hash value 0.
-A NULL value results in some predefined value.
+For cksum, an NULL text results in hash value 0 and
+an empty text results in some predefined value.

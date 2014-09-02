@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# $Id: test_pg_comparator.sh 1499 2014-07-12 18:03:30Z coelho $
+# $Id: test_pg_comparator.sh 1533 2014-09-02 12:41:48Z coelho $
 #
 # ./test_pg_comparator.sh -r 100 \
 #    -a fabien:mypassword@localhost:port -- \
@@ -280,9 +280,9 @@ function parse_conn()
   elif [[ $auth == mysql://* ]]
   then
     if [ "$host" ] ; then
-      echo "mysql --host=$host --port=$port --user=$user --pass=$pass --database=$base"
+      echo "mysql --host=$host --port=$port --user=$user --password=$pass --database=$base"
     else
-      echo "mysql --user=$user --pass=$pass --database=$base"
+      echo "mysql --user=$user --password=$pass --database=$base"
     fi
   elif [[ $auth == sqlite://* ]] ; then
       echo "sqlite3 $base"

@@ -1,5 +1,5 @@
 --
--- $Id: mysql_checksum.sql 687 2010-04-03 12:07:15Z fabien $
+-- $Id: mysql_checksum.sql 1520 2014-08-03 11:27:06Z coelho $
 --
 
 DROP FUNCTION IF EXISTS cksum8;
@@ -9,3 +9,11 @@ DROP FUNCTION IF EXISTS cksum2;
 CREATE FUNCTION cksum8 RETURNS INTEGER SONAME 'mysql_checksum.so';
 CREATE FUNCTION cksum4 RETURNS INTEGER SONAME 'mysql_checksum.so';
 CREATE FUNCTION cksum2 RETURNS INTEGER SONAME 'mysql_checksum.so';
+
+DROP FUNCTION IF EXISTS fnv8;
+DROP FUNCTION IF EXISTS fnv4;
+DROP FUNCTION IF EXISTS fnv2;
+
+CREATE FUNCTION fnv8 RETURNS INTEGER SONAME 'mysql_checksum.so';
+CREATE FUNCTION fnv4 RETURNS INTEGER SONAME 'mysql_checksum.so';
+CREATE FUNCTION fnv2 RETURNS INTEGER SONAME 'mysql_checksum.so';

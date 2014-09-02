@@ -1,4 +1,4 @@
-# $Id: Makefile 1460 2012-11-02 18:21:27Z fabien $
+# $Id: Makefile 1528 2014-08-04 07:09:24Z coelho $
 
 #
 # PostgreSQL stuff
@@ -31,6 +31,9 @@ $(name).html: $(name)
 	pod2html --title $(name) $< | \
 	  sed -e '/^<body style/a<h1>$(name)</h1>' > $@
 	touch -r $< $@
+
+# dependencies
+pgc_checksum.o: jenkins.c fnv.c
 
 pgsql_install: install
 pgsql_uninstall: uninstall

@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# $Id: pg_comparator.pl 1512 2014-07-24 08:21:31Z coelho $
+# $Id: pg_comparator.pl 1532 2014-09-01 06:56:42Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -84,13 +84,13 @@ Default is B<create> because it always works for both databases.
 
 =item C<--checksum-function=fun> or C<--cf=fun> or C<-c fun>
 
-Checksum function to use, either B<ck> or B<md5>.
-For PostgreSQL, MySQL and SQLite the provided B<ck> checksum functions must be
-loaded into the target databases.
+Checksum function to use, either B<ck>, B<fnv> or B<md5>.
+For PostgreSQL, MySQL and SQLite the provided B<ck> and B<fnv> checksum
+functions must be loaded into the target databases.
 Choosing B<md5> does not come free either: the provided cast functions must be
 loaded into the target databases and the computation is more expensive.
 
-Default is B<ck>, which is faster, especially if the operation is cpu-bound
+Default is B<ck>, which is fast, especially if the operation is cpu-bound
 and the bandwidth is reasonably high.
 
 =item C<--checksum-size=n> or C<--check-size=n> or C<--cs=n> or C<-z n>
@@ -116,7 +116,7 @@ Note that they are dropped implicitly by default when the connection
 is closed as they are temporary, see C<-(-no)-temporary> option.
 This option is useful for debugging.
 
-Default is B<not> to clear explicitely the checksum and summary tables,
+Default is B<not> to clear explicitly the checksum and summary tables,
 as it is not needed.
 
 =item C<--debug> or C<-d>
@@ -144,7 +144,7 @@ This option is only used for non regression tests. See the TESTS section.
 
 Folding factor: log2 of the number of rows grouped together at each stage,
 starting from the leaves so that the first round always groups as many records
-as possible. The power of two allows to use masked computations.
+as possible. The power of two allows one to use masked computations.
 The minimum value of 1 builds a binary tree.
 
 Default folding factor log2 is B<7>, i.e. size 128 folds.
@@ -169,7 +169,7 @@ Default is to build both key and tuple checksums on the fly.
 =item C<--lock>, C<--no-lock>
 
 Whether to lock tables.
-Setting the option explicitely overrides the default one way or another.
+Setting the option explicitly overrides the default one way or another.
 For PostgreSQL, this option requires C<--transaction>, which is enabled by
 default.
 
@@ -207,7 +207,7 @@ the C<--max-ratio> option, with a mimimum of 100 differences allowed.
 
 =item C<--max-levels=0>
 
-Maximum number of levels used. Allows to cut-off folding. 0 means no cut-off.
+Maximum number of levels used. Allows one to cut-off folding. 0 means no cut-off.
 Setting a value of 1 would only use the checksum table, without summaries.
 A value of 3 or 4 would be raisonable, as the last levels of the tree are
 nice for the theoretical complexity formula, but do not improve performance
@@ -593,6 +593,14 @@ C<share/contrib/pgc_casts.sql>. New checksums and casts are also available
 for MySQL, see C<mysql_*.sql>. An loadable implementation of suitable
 checksum functions is also available for SQLite, see C<sqlite_checksum.*>.
 
+The C<ck> checksum is based on
+L<Jenkins hash|https://en.wikipedia.org/wiki/Jenkins_hash>,
+which relies on simple add, shift and xor integer operations.
+The C<fnv> checksum is inspired by
+L<FNV hash|https://en.wikipedia.org/wiki/Fowler_Noll_Vo_hash>
+(64 bits 1a version) which uses xor and mult integer operations,
+although I also added some shift and add to help tweak high bits.
+
 =item 3
 
 An aggregate function is used to summarize checksums for a range of rows.
@@ -871,7 +879,7 @@ there is a lot of options the combination of which cannot all be tested.
 If the tables to compare are in the same database, a simple SQL
 query can extract the differences. Assuming Tables I<T1> and I<T2>
 with primary key I<id> and non null contents I<data>, then their
-differences, that is how I<T1> differs from the reference I<T2>,
+differences, that is how I<T2> differs from the reference I<T1>,
 is summarized by the following query:
 
 	SELECT COALESCE(T1.id, T2.id) AS key,
@@ -1012,7 +1020,7 @@ L<xSQL Software Data Compare|http://www.xsqlsoftware.com/Product/Sql_Data_Compar
 =head1 TESTS
 
 The paper reports numerous performance tests with PostgreSQL under various
-bandwith constraints.
+bandwidth constraints.
 
 Moreover, non regression tests are run over randomly generated tables
 when the software is upgraded:
@@ -1064,7 +1072,7 @@ null handling, foldings, number of key and value attributes...
 
 =head1 BUGS
 
-All softwares have bugs. This is a software, hence it has bugs.
+All software have bugs. This is a software, hence it has bugs.
 
 Reporting bugs is good practice, so tell me if you find one.
 If you have a fix, this is even better!
@@ -1103,6 +1111,16 @@ tables: this imply that you must be allowed to do that for the comparison...
 However, read-only replicas do not allow creating objects, which mean that you
 cannot use pg_comparator to compare table contents on a synchronized replica.
 
+=head1 TODO
+
+Allow larger checksum sizes.
+
+Make it a PostgreSQL extension.
+
+Add an option to avoid IN (x,y,...) syntax, maybe with a temporary table
+to hold values and use a JOIN on that. I'm not sure about the performance
+implications, though.
+
 =head1 VERSIONS
 
 See L<PG Foundry|http://pgfoundry.org/projects/pg-comparator/> for the latest
@@ -1111,6 +1129,15 @@ version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
 =over 4
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
+
+In development.
+
+Fix some typos found by Lintian and pointed out by I<Ivan Mincik>.
+Add support for FNV (Fowler Noll Vo) version 1a inspired hash functions.
+The I<release> validation was run successfully
+on PostgreSQL 9.4b2 and MySQL 5.5.38.
+
+=item B<version 2.2.5> (r1512 on 2014-07-24)
 
 Fix broken URL defaults to use UNIX sockets with an empty host name,
 per report by I<Ivan Mincik>.
@@ -1394,7 +1421,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1512 $';
+my $revision = '$Revision: 1532 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1471,6 +1498,7 @@ sub firebird_cast($$) {
 sub pgsql_cksum_template($$) {
   my ($algo, $sz) = @_;
   return "CKSUM$sz((%s)::TEXT)" if $algo eq 'ck';
+  return "FNV$sz((%s)::TEXT)" if $algo eq 'fnv';
   return pgsql_cast("DECODE(MD5(%s::TEXT),'hex')::BIT(" . 8*$sz . ")", $sz)
     if $algo eq 'md5';
   die "unexpected checksum $algo for pgsql";
@@ -1479,6 +1507,7 @@ sub pgsql_cksum_template($$) {
 sub mysql_cksum_template($$) {
   my ($algo, $sz) = @_;
   return "CKSUM$sz(CAST(%s AS BINARY))" if $algo eq 'ck';
+  return "FNV$sz(CAST(%s AS BINARY))" if $algo eq 'fnv';
   return mysql_cast("CONV(LEFT(MD5(%s),". 2*$sz ."),16,10)", $sz)
     if $algo eq 'md5';
   die "unexpected checksum $algo for mysql";
@@ -1487,6 +1516,7 @@ sub mysql_cksum_template($$) {
 sub sqlite_cksum_template($$) {
   my ($algo, $sz) = @_;
   return "CKSUM$sz(CAST(%s AS TEXT))" if $algo eq 'ck';
+  return "FNV$sz(CAST(%s AS TEXT))" if $algo eq 'fnv';
   return "PGC_MD5($sz, CAST(%s AS TEXT))" if $algo eq 'md5';
   die "unexpected checksum $algo for sqlite";
 }
@@ -1718,7 +1748,8 @@ my %M = (
 	  "COALESCE(DECODE(MD5(${att}::TEXT),'hex'),''::BYTEA)" .
 	  "::BIT(" .  8*$sz . ")", $sz);
 	},
-      'ck' => sub { my ($sz, $att) = @_; return "CKSUM$sz(${att}::TEXT)"; }
+      'ck' => sub { my ($sz, $att) = @_; return "CKSUM$sz(${att}::TEXT)"; },
+      'fnv' => sub { my ($sz, $att) = @_; return "FNV$sz(${att}::TEXT)"; }
     },
     # sql checksum template: cksum($algo, $size)
     'cksum' => \&pgsql_cksum_template,
@@ -1773,6 +1804,9 @@ my %M = (
 	},
       'ck' => sub { my ($sz, $att) = @_;
 	return "CKSUM$sz(CAST($att AS BINARY))"
+      },
+      'fnv' => sub { my ($sz, $att) = @_;
+	return "FNV$sz(CAST($att AS BINARY))"
       }
     },
     'cksum' => \&mysql_cksum_template,
@@ -1822,6 +1856,9 @@ my %M = (
 	},
       'ck' => sub { my ($sz, $att) = @_;
         return "CKSUM$sz(CAST($att AS TEXT))";
+      },
+      'fnv' => sub { my ($sz, $att) = @_;
+        return "FNV$sz(CAST($att AS TEXT))";
       }
     },
     'cksum' => \&sqlite_cksum_template,
@@ -2957,8 +2994,8 @@ $t2 = $t1 unless defined $t2;
 die "null should be 'text' or 'hash', got $null"
   unless $null =~ /^(text|hash)$/i;
 
-die "checksum should be 'md5' or 'ck', got ($checksum)"
-  unless $checksum =~ /^(md5|ck)$/i;
+die "checksum should be 'md5', 'ck' or 'fnv', got ($checksum)"
+  unless $checksum =~ /^(md5|ck|fnv)$/i;
 
 die "checksize must be 2, 4 or 8, got ($checksize)"
   unless $checksize =~ /^[248]$/;

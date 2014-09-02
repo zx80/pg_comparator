@@ -1,5 +1,5 @@
 #
-# $Id: test.mk 1510 2014-07-24 06:31:50Z coelho $
+# $Id: test.mk 1522 2014-08-03 11:48:21Z coelho $
 #
 # run pg_comparator validation checks
 #
@@ -76,6 +76,7 @@ xor	= xor
 sum	= sum
 md5	= md5
 ck	= ck
+fnv	= fnv
 hash	= hash
 text	= text
 
@@ -156,6 +157,7 @@ full_cs:
 full_cf:
 	$(MAKE) CF=md5 full_cs
 	$(MAKE) CF=ck full_cs
+	$(MAKE) CF=fnv full_cs
 
 # full null handling
 .PHONY: full_null
@@ -194,7 +196,7 @@ fast:
 	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(text) FOLD=2 KEYS=0 COLS=1 pgcopts+=' -u' run
 	$(MAKE) CF=$(md5) CS=8 AGG=$(xor) NULL=$(hash) FOLD=1 KEYS=0 COLS=1 run
 	$(MAKE) CF=$(md5) CS=8 AGG=$(sum) NULL=$(text) FOLD=1 KEYS=1 COLS=2 pgcopts+=' --max-levels=3' run
-	$(MAKE) CF=$(md5) CS=4 AGG=$(sum) NULL=$(hash) FOLD=3 KEYS=0 COLS=2 pgcopts+=' --lock' run
+	$(MAKE) CF=$(fnv) CS=4 AGG=$(sum) NULL=$(hash) FOLD=3 KEYS=0 COLS=2 pgcopts+=' --lock' run
 	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(text) FOLD=2 KEYS=0 COLS=1 pgcopts+=' --cc=insert' run
 	$(MAKE) CF=$(ck)  CS=4 AGG=$(sum) NULL=$(hash) FOLD=4 KEYS=1 COLS=0 pgcopts+=' --no-lock' run
 	$(MAKE) CF=$(ck)  CS=8 AGG=$(sum) NULL=$(hash) FOLD=4 KEYS=1 COLS=3 pgcopts+=' --size=$(ROWS)' run

@@ -1,4 +1,4 @@
-/* $Id: sqlite_checksum.c 1460 2012-11-02 18:21:27Z fabien $ */
+/* $Id: sqlite_checksum.c 1520 2014-08-03 11:27:06Z coelho $ */
 /*
  * SQLite extensions for pg_comparator.
  *
@@ -108,6 +108,90 @@ static void sqlite_checksum_int8(
   sqlite3_result_int64(ctx, checksum_int8(txt, len));
 }
 
+static void sqlite_fnv_int2(
+  sqlite3_context * ctx,
+  int argc,
+  sqlite3_value ** argv)
+{
+  assert(argc==1);
+  const unsigned char * txt;
+  size_t len;
+  switch (sqlite3_value_type(argv[0])) {
+  case SQLITE_NULL:
+    txt = NULL;
+    len = 0;
+    break;
+  case SQLITE_TEXT:
+    txt = sqlite3_value_text(argv[0]);
+    len = sqlite3_value_bytes(argv[0]);
+    break;
+    // hmmm... should I do something else?
+  case SQLITE_INTEGER:
+  case SQLITE_FLOAT:
+  case SQLITE_BLOB:
+  default:
+    sqlite3_result_error(ctx, "expecting TEXT or NULL", -1);
+    return;
+  }
+  sqlite3_result_int(ctx, checksum_int2(txt, len));
+}
+
+static void sqlite_fnv_int4(
+  sqlite3_context * ctx,
+  int argc,
+  sqlite3_value ** argv)
+{
+  assert(argc==1);
+  const unsigned char * txt;
+  size_t len;
+  switch (sqlite3_value_type(argv[0])) {
+  case SQLITE_NULL:
+    txt = NULL;
+    len = 0;
+    break;
+  case SQLITE_TEXT:
+    txt = sqlite3_value_text(argv[0]);
+    len = sqlite3_value_bytes(argv[0]);
+    break;
+    // hmmm... should I do something else?
+  case SQLITE_INTEGER:
+  case SQLITE_FLOAT:
+  case SQLITE_BLOB:
+  default:
+    sqlite3_result_error(ctx, "expecting TEXT or NULL", -1);
+    return;
+  }
+  sqlite3_result_int(ctx, checksum_int4(txt, len));
+}
+
+static void sqlite_fnv_int8(
+  sqlite3_context * ctx,
+  int argc,
+  sqlite3_value ** argv)
+{
+  assert(argc==1);
+  const unsigned char * txt;
+  size_t len;
+  switch (sqlite3_value_type(argv[0])) {
+  case SQLITE_NULL:
+    txt = NULL;
+    len = 0;
+    break;
+  case SQLITE_TEXT:
+    txt = sqlite3_value_text(argv[0]);
+    len = sqlite3_value_bytes(argv[0]);
+    break;
+    // hmmm... should I do something else?
+  case SQLITE_INTEGER:
+  case SQLITE_FLOAT:
+  case SQLITE_BLOB:
+  default:
+    sqlite3_result_error(ctx, "expecting TEXT or NULL", -1);
+    return;
+  }
+  sqlite3_result_int64(ctx, checksum_int8(txt, len));
+}
+
 /***************************************************** INTEGER XOR AGGREGATE */
 
 static void ixor_step(
@@ -169,6 +253,24 @@ int sqlite3_extension_init(
 			  "cksum8", 1, SQLITE_UTF8, NULL,
 			  // func, step, final
 			  sqlite_checksum_int8, NULL, NULL);
+
+  sqlite3_create_function(db,
+			  // name, #arg, txt, data,
+			  "fnv2", 1, SQLITE_UTF8, NULL,
+			  // func, step, final
+			  sqlite_fnv_int2, NULL, NULL);
+
+  sqlite3_create_function(db,
+			  // name, #arg, txt, data,
+			  "fnv4", 1, SQLITE_UTF8, NULL,
+			  // func, step, final
+			  sqlite_fnv_int4, NULL, NULL);
+
+  sqlite3_create_function(db,
+			  // name, #arg, txt, data,
+			  "fnv8", 1, SQLITE_UTF8, NULL,
+			  // func, step, final
+			  sqlite_fnv_int8, NULL, NULL);
 
   sqlite3_create_function(db,
         // name, #args, txt, data,
