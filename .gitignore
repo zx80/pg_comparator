@@ -1,0 +1,7 @@
+auth.mk
+LICENSE
+pg_comparator
+pgc_casts.sql
+pgc_checksum.sql
+*.o
+*.so
