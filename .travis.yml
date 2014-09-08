@@ -1,0 +1,55 @@
+language: perl
+
+addons:
+  postgresql: "9.3"
+
+before_install:
+  - sudo apt-get update -qq
+  # SQLite
+  - sudo apt-get install -qq sqlite3 libsqlite3-dev
+  # Firebird
+  - sudo apt-get install -qq firebird2.5-super firebird2.5-dev
+  - sudo sed /ENABLE_FIREBIRD_SERVER=/s/no/yes/ -i /etc/default/firebird2.5
+  - sudo service firebird2.5-super start
+  # PostgreSQL
+  - sudo apt-get install -qq postgresql-server-dev-9.3 postgresql-contrib-9.3
+  # MySQL
+  - sudo apt-get install -qq libmysqlclient-dev
+
+install: 
+  # Perl dependencies
+  - cpanm Getopt::Long DBI DBD::Pg DBD::mysql DBD::SQLite Term::ReadPassword Pod::Usage threads Digest::MD5
+
+before_script:
+  # PostgreSQL
+  - psql -c "CREATE USER test PASSWORD 'test' LOGIN" -U postgres
+  - psql -c "CREATE DATABASE test OWNER test" -U postgres
+  # MySQL
+  - mysql -e 'CREATE DATABASE test;'
+  # Firebird
+  - isql-fb -z -q -i /dev/null
+  - echo 'CREATE DATABASE "/tmp/test.fdb";' > /tmp/create_firebird.sql
+  - isql-fb -u SYSDBA -p masterkey -i /tmp/create_firebird.sql -q
+
+env:
+  global:
+    - "auth1=pgsql://test:test@localhost"
+    - "auth2=mysql://root:@localhost"
+    - "auth3=sqlite://"
+    - "auth4=firebird://sysdba:masterkey@"
+    - "fdb=/tmp/test.fdb"
+
+script:
+  # Build
+  - make pg_comparator all
+  # Install
+  - sudo make install mysql_install sqlite_install
+  # PostgreSQL
+  - psql -U postgres test < /usr/share/postgresql/9.3/contrib/xor_aggregate.sql
+  - psql -U postgres test < /usr/share/postgresql/9.3/contrib/pgc_checksum.sql
+  - psql -U postgres test < /usr/share/postgresql/9.3/contrib/pgc_casts.sql
+  # MySQL
+  - mysql -u root test < /usr/lib/mysql/plugin/mysql_casts.sql
+  - mysql -u root test < /usr/lib/mysql/plugin/mysql_checksum.sql
+  # Tests
+  - make -f test.mk validate_hour

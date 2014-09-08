@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # $Id: pg_comparator.pl 1532 2014-09-01 06:56:42Z coelho $
 #
