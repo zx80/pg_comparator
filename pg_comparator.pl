@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1532 2014-09-01 06:56:42Z coelho $
+# $Id: pg_comparator.pl 1540 2015-04-18 06:42:28Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -274,6 +274,12 @@ However, the database server specified in the URL must be consistent with
 this source specification so that the queries' syntax is the right one.
 
 Default is to rely on the two URL arguments.
+
+=item C<--skip-inserts>, C<--skip-updates>, C<--skip-deletes>
+
+When synchronizing, do not perform these operations.
+
+Default under C<--synchronize> is to do all operations.
 
 =item C<--stats=(txt|csv)>
 
@@ -1123,19 +1129,19 @@ implications, though.
 
 =head1 VERSIONS
 
-See L<PG Foundry|http://pgfoundry.org/projects/pg-comparator/> for the latest
-version. My L<web site|http://www.coelho.net/pg_comparator/> for the tool.
+See L<web site|http://www.coelho.net/pg_comparator/> for the latest version.
 
 =over 4
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
-In development.
-
 Fix some typos found by Lintian and pointed out by I<Ivan Mincik>.
 Add support for FNV (Fowler Noll Vo) version 1a inspired hash functions.
+Add option to skip inserts, updates or deletes when synchronizing,
+which may be useful to deal with foreign keys, issue pointed
+out by I<Graeme Bell>.
 The I<release> validation was run successfully
-on PostgreSQL 9.4b2 and MySQL 5.5.38.
+on PostgreSQL 9.4.1 and MySQL 5.5.41.
 
 =item B<version 2.2.5> (r1512 on 2014-07-24)
 
@@ -1379,7 +1385,7 @@ as suggested by I<Erik Aronesty>.
 
 =item B<version 1.3> (r239 on 2004-08-31)
 
-Project moved to L<PG Foundry|http://pgfoundry.org/>.
+Project moved to PG Foundry.
 Use cksum8 checksum function by default.
 Minor doc updates.
 
@@ -1421,7 +1427,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1532 $';
+my $revision = '$Revision: 1540 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1433,6 +1439,7 @@ my ($cleanup, $size, $usekey, $usenull, $synchronize) = (0, 0, 0, 1, 0);
 my ($do_it, $do_trans, $prefix, $ckcmp) = (0, 1, 'pgc_cmp', 'create');
 my ($maskleft, $name, $key_size, $col_size, $where) = (1, 'none', 0, 0, '');
 my ($factor, $expect_warn) = (7, 0);
+my ($skip_inserts, $skip_updates, $skip_deletes) = (0, 0, 0);
 # condition, tests, max size of blobs, data sources...
 my ($expect, $longreadlen, $source1, $source2, $key_cs, $tup_cs, $do_lock,
     $env_pass, $max_report, $stats, $pg_copy);
@@ -2897,6 +2904,9 @@ GetOptions(
   # functions
   "synchronize|sync|S!" => \$synchronize,
   "do-it|do|D!" => \$do_it,
+  "skip-inserts!" => \$skip_inserts,
+  "skip-updates!" => \$skip_updates,
+  "skip-deletes!" => \$skip_deletes,
   "expect|e=i" => \$expect,
   "expect-warn" => \$expect_warn, # hidden option used by the validation
   "report|r!" => \$report,
@@ -3555,7 +3565,10 @@ if ($synchronize and
 	($where? "($where) AND ": '') . $where_k2;
     verb 2, $del_sql;
     my $del_sth = $dbh2->prepare($del_sql) if $do_it;
-    for my $d (@$del, @$delb, $pg_copy? @$upt: ()) {
+    my @alldels = ();
+    push @alldels, (@$del, @$delb) unless $skip_deletes;
+    push @alldels, @$upt if $pg_copy and not $skip_updates;
+    for my $d (@alldels) {
       sth_param_exec($do_it, "DELETE $t2", $del_sth, $d);
     }
     # undef $del_sth;
@@ -3570,7 +3583,9 @@ if ($synchronize and
     $select .= "($where) AND " if $where;
     $select .= "(" . join(',', @$k1) . ") IN (";
     # we COPY both inserts and updates
-    my @allins = (@$ins, @$insb, @$upt);
+    my @allins = ();
+    push @allins, (@$ins, @$insb) unless $skip_inserts;
+    push @allins, @$upt unless $skip_updates;
     while (@allins) {
       my $bulk = '';
       for my $k (splice(@allins, 0, $pg_copy)) { # chunked
@@ -3598,11 +3613,11 @@ if ($synchronize and
       ($where? "($where) AND ": '') . $where_k1;
       verb 2, $val_sql;
       $val_sth = $dbh1->prepare($val_sql)
-      if @$ins or @$insb or @$upt;
+        if @$ins or @$insb or @$upt;
     }
 
     # handle inserts
-    if (@$ins or @$insb)
+    if ((@$ins or @$insb) and not $skip_inserts)
     {
       my $ins_sql = "INSERT INTO $t2(" . join(',', @$c2, @$k2) . ") " .
 	'VALUES(?' . ',?' x (@$k2+@$c2-1) . ')';
@@ -3628,7 +3643,7 @@ if ($synchronize and
     }
 
     # handle updates
-    if (@$upt)
+    if (@$upt and not $skip_updates)
     {
       die "there must be some columns to update" unless $c1;
       my $upt_sql = "UPDATE $t2 SET $set_c2 WHERE " .
