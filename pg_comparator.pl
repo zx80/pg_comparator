@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1543 2015-04-18 06:42:28Z coelho $
+# $Id: pg_comparator.pl 1544 2015-04-18 06:55:48Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -1130,10 +1130,14 @@ implications, though.
 =head1 VERSIONS
 
 See L<web site|http://www.coelho.net/pg_comparator/> for the latest version.
+Although versions are managed really with SVN, there is also a
+L<github repos|https://github.com/zx80/pg_comparator>.
 
 =over 4
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
+
+Documentation updates.
 
 In development.
 
@@ -1431,7 +1435,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1543 $';
+my $revision = '$Revision: 1544 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
