@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1540 2015-04-18 06:42:28Z coelho $
+# $Id: pg_comparator.pl 1543 2015-04-18 06:42:28Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -1135,6 +1135,10 @@ See L<web site|http://www.coelho.net/pg_comparator/> for the latest version.
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
+In development.
+
+=item B<version 2.2.6> (r1540 on 2015-04-18)
+
 Fix some typos found by Lintian and pointed out by I<Ivan Mincik>.
 Add support for FNV (Fowler Noll Vo) version 1a inspired hash functions.
 Add option to skip inserts, updates or deletes when synchronizing,
@@ -1427,7 +1431,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1540 $';
+my $revision = '$Revision: 1543 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
