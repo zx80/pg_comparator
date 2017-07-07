@@ -1,18 +1,18 @@
 language: perl
 
 addons:
-  postgresql: "9.3"
+  postgresql: "9.6"
 
 before_install:
   - sudo apt-get update -qq
   # SQLite
   - sudo apt-get install -qq sqlite3 libsqlite3-dev
-  # Firebird
+  # Firebird (experimental, does not really work)
   - sudo apt-get install -qq firebird2.5-super firebird2.5-dev
   - sudo sed /ENABLE_FIREBIRD_SERVER=/s/no/yes/ -i /etc/default/firebird2.5
   - sudo service firebird2.5-super start
   # PostgreSQL
-  - sudo apt-get install -qq postgresql-server-dev-9.3 postgresql-contrib-9.3
+  - sudo apt-get install -qq postgresql-server-dev-9.6 postgresql-contrib-9.6
   # MySQL
   - sudo apt-get install -qq libmysqlclient-dev
 
@@ -45,9 +45,7 @@ script:
   # Install
   - sudo make install mysql_install sqlite_install
   # PostgreSQL
-  - psql -U postgres test < /usr/share/postgresql/9.3/contrib/xor_aggregate.sql
-  - psql -U postgres test < /usr/share/postgresql/9.3/contrib/pgc_checksum.sql
-  - psql -U postgres test < /usr/share/postgresql/9.3/contrib/pgc_casts.sql
+  - psql -U postgres -c 'CREATE EXTENSION pgcmp' test
   # MySQL
   - mysql -u root test < /usr/lib/mysql/plugin/mysql_casts.sql
   - mysql -u root test < /usr/lib/mysql/plugin/mysql_checksum.sql
