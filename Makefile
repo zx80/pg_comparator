@@ -1,4 +1,4 @@
-# $Id: Makefile 1576 2017-07-07 08:52:53Z coelho $
+# $Id: Makefile 1579 2017-07-07 09:11:54Z coelho $
 
 #
 # PostgreSQL stuff
@@ -6,13 +6,14 @@
 
 name		= pg_comparator
 
+EXTVERSION	= 3.0
 EXTENSION	= pgcmp
 SCRIPTS		= $(name)
 MODULES		= $(EXTENSION)
-DATA		= pgcmp--3.0.sql
+DATA		= $(EXTENSION)--$(EXTVERSION).sql
 DOCS		= README.$(name)
 
-EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp
+EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp $(EXTENSION).control
 
 # get postgresql extension infrastructure
 PG_CONFIG	= pg_config
@@ -34,6 +35,9 @@ pgcmp.o: jenkins.c fnv.c
 
 pgsql_install: install
 pgsql_uninstall: uninstall
+
+$(EXTENSION).control: $(EXTENSION).control.in
+	sed -e 's/@EXTVERSION@/$(EXTVERSION)/g' $< > $@
 
 #
 # MySQL stuff
