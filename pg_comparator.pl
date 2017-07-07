@@ -4,7 +4,7 @@
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
-# HELP 3: read pod stuff bellow with your favorite text viewer
+# HELP 3: read pod stuff below with your favorite text viewer
 #
 
 use strict;   # I don't like perl
@@ -39,7 +39,7 @@ is a mere side effect.
 
 =head1 OPTIONS
 
-Options allow to request help or to adjust some internal parameters.
+Options allow requesting help or to adjust some internal parameters.
 Short one-letter options are also available, usually with the first letter
 of the option name.
 
@@ -203,7 +203,7 @@ option is ignored, otherwise the effort is computed with the ratio once
 the table size is known.
 
 Default is to compute the maximum number of reported differences based on
-the C<--max-ratio> option, with a mimimum of 100 differences allowed.
+the C<--max-ratio> option, with a minimum of 100 differences allowed.
 
 =item C<--max-levels=0>
 
@@ -240,9 +240,9 @@ when synchronizing, by chunks of the specified size.
 
 Name prefix, possibly schema qualified, used for generated comparison tables
 by appending numbers to it. Consider changing the prefix if you expect several
-comparisons to run concurrently agains the same database.
+comparisons to run concurrently against the same database.
 
-Default is C<pgc_cmp>. Cheksum tables is named C<pgc_cmp_1_0> and
+Default is C<pgc_cmp>. Checksum tables is named C<pgc_cmp_1_0> and
 C<pgc_cmp_2_0>, and summary tables are named by increasing the last number.
 
 =item C<--report>, C<--no-report>
@@ -404,7 +404,7 @@ that does not necessary mean anything useful.
 
   [driver://][login[:pass]@][host][:port]/[base/[[schema.]table[?key[:cols]]]]
 
-See the EXAMPLES section bellow, and also the C<--source-*> options above.
+See the EXAMPLES section below, and also the C<--source-*> options above.
 
 Note that some default value used by DBI drivers may be changed with
 driver-specific environment variables, and that DBI also provides its own
@@ -1195,7 +1195,7 @@ Add an option to avoid IN (x,y,...) syntax, maybe with a temporary table
 to hold values and use a JOIN on that. I'm not sure about the performance
 implications, though.
 
-Allow to generate the SQL update script without applying it.
+Allow generating the SQL update script without applying it.
 
 Option to generate more compact updates, i.e. only update attributes with
 different values.
