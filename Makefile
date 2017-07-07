@@ -6,14 +6,16 @@
 
 name		= pg_comparator
 
+EXTVERSION	= 3.0
+
 EXTENSION	= pgcmp
 SCRIPTS		= $(name)
 MODULES		= $(EXTENSION)
 DATA_built	= $(name)
-DATA		= pgcmp--3.0.sql
+DATA		= $(EXTENSION)--$(EXTVERSION).sql
 DOCS		= README.$(name)
 
-EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp
+EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp $(EXTENSION).control
 
 # get postgresql extension infrastructure
 PG_CONFIG	= pg_config
@@ -35,6 +37,9 @@ pgcmp.o: jenkins.c fnv.c
 
 pgsql_install: install
 pgsql_uninstall: uninstall
+
+$(EXTENSION).control: $(EXTENSION).control.in
+	sed -e 's/@EXTVERSION@/$(EXTVERSION)/g' $< > $@
 
 #
 # MySQL stuff

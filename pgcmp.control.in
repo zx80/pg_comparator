@@ -1,0 +1,3 @@
+# pg_comparator extension
+comment = 'pg_comparator extension'
+default_version = @EXTVERSION@
