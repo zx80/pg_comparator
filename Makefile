@@ -9,7 +9,6 @@ name		= pg_comparator
 EXTENSION	= pgcmp
 SCRIPTS		= $(name)
 MODULES		= $(EXTENSION)
-DATA_built	= $(name)
 DATA		= pgcmp--3.0.sql
 DOCS		= README.$(name)
 
