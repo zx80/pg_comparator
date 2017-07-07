@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1575 2017-07-07 08:52:33Z coelho $
+# $Id: pg_comparator.pl 1582 2017-07-07 10:21:41Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -1213,7 +1213,7 @@ L<github repos|https://github.com/zx80/pg_comparator>.
 Fix spelling errors in the documentation, reported by I<Bas Couwenberg>.
 Fix distribution C<Makefile>.
 
-=item B<version 2.3.0> (r1569 on 2017-06-07)
+=item B<version 2.3.0> (r1569 on 2017-07-07)
 
 Add new L</"INSTALL"> Section.
 Turn cast, functions and aggregates into a PostgreSQL extension.
@@ -1518,7 +1518,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1575 $';
+my $revision = '$Revision: 1582 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
