@@ -1,10 +1,10 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1572 2017-07-07 04:40:07Z coelho $
+# $Id: pg_comparator.pl 1575 2017-07-07 08:52:33Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
-# HELP 3: read pod stuff bellow with your favorite text viewer
+# HELP 3: read pod stuff below with your favorite text viewer
 #
 
 use strict;   # I don't like perl
@@ -203,7 +203,7 @@ option is ignored, otherwise the effort is computed with the ratio once
 the table size is known.
 
 Default is to compute the maximum number of reported differences based on
-the C<--max-ratio> option, with a mimimum of 100 differences allowed.
+the C<--max-ratio> option, with a minimum of 100 differences allowed.
 
 =item C<--max-levels=0>
 
@@ -240,7 +240,7 @@ when synchronizing, by chunks of the specified size.
 
 Name prefix, possibly schema qualified, used for generated comparison tables
 by appending numbers to it. Consider changing the prefix if you expect several
-comparisons to run concurrently agains the same database.
+comparisons to run concurrently against the same database.
 
 Default is C<pgc_cmp>. Cheksum tables is named C<pgc_cmp_1_0> and
 C<pgc_cmp_2_0>, and summary tables are named by increasing the last number.
@@ -404,7 +404,7 @@ that does not necessary mean anything useful.
 
   [driver://][login[:pass]@][host][:port]/[base/[[schema.]table[?key[:cols]]]]
 
-See the EXAMPLES section bellow, and also the C<--source-*> options above.
+See the EXAMPLES section below, and also the C<--source-*> options above.
 
 Note that some default value used by DBI drivers may be changed with
 driver-specific environment variables, and that DBI also provides its own
@@ -1195,7 +1195,7 @@ Add an option to avoid IN (x,y,...) syntax, maybe with a temporary table
 to hold values and use a JOIN on that. I'm not sure about the performance
 implications, though.
 
-Allow to generate the SQL update script without applying it.
+Allow generating the SQL update script without applying it.
 
 Option to generate more compact updates, i.e. only update attributes with
 different values.
@@ -1210,7 +1210,8 @@ L<github repos|https://github.com/zx80/pg_comparator>.
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
-In development.
+Fix spelling errors in the documentation, reported by I<Bas Couwenberg>.
+Fix distribution C<Makefile>.
 
 =item B<version 2.3.0> (r1569 on 2017-06-07)
 
@@ -1218,7 +1219,7 @@ Add new L</"INSTALL"> Section.
 Turn cast, functions and aggregates into a PostgreSQL extension.
 Fix C<--where> handling when C<--tcs> is used, reported by I<Kenneth Hammink>.
 Add C<--pg-text-cast> option to work around missing implicit casts, issue
-reported by Saulius Grigaitis.
+reported by I<Saulius Grigaitis>.
 Documentation updates.
 The I<release> validation was run successfully
 on PostgreSQL 9.6.3 and MySQL 5.7.18.
@@ -1517,7 +1518,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1572 $';
+my $revision = '$Revision: 1575 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
