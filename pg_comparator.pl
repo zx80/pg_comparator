@@ -39,7 +39,7 @@ is a mere side effect.
 
 =head1 OPTIONS
 
-Options allow to request help or to adjust some internal parameters.
+Options allow requesting help or to adjust some internal parameters.
 Short one-letter options are also available, usually with the first letter
 of the option name.
 
@@ -242,7 +242,7 @@ Name prefix, possibly schema qualified, used for generated comparison tables
 by appending numbers to it. Consider changing the prefix if you expect several
 comparisons to run concurrently against the same database.
 
-Default is C<pgc_cmp>. Cheksum tables is named C<pgc_cmp_1_0> and
+Default is C<pgc_cmp>. Checksum tables is named C<pgc_cmp_1_0> and
 C<pgc_cmp_2_0>, and summary tables are named by increasing the last number.
 
 =item C<--report>, C<--no-report>
