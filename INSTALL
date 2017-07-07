@@ -4,8 +4,7 @@ With version 8.0 or better, simply use the pgxs GNU makefile provided:
 
 	sh> make install
 
-
-You must only insure that the "pg_config" found in your path is the one
+You must only ensure that the "pg_config" found in your path is the one
 of the target postgresql server, and that development packages are installed.
 
 Then load the needed extensions (casts, checksum functions, xor aggregate):

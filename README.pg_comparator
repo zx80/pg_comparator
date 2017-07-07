@@ -1,3 +1,7 @@
-to get help about pg_comparator, do:
+To get help about pg_comparator, try:
 
 	sh> pg_comparator --man
+
+To load necessary extensions into PostgreSQL:
+
+	psql> CREATE EXTENSION pgcmp;

@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1544 2015-04-18 06:55:48Z coelho $
+# $Id: pg_comparator.pl 1572 2017-07-07 04:40:07Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -226,6 +226,10 @@ Default is B<text> because it is faster.
 =item C<--option> or C<-o>
 
 Show option summary.
+
+=item C<--pg-text-cast>
+
+With PostgreSQL add explicit TEXT casts to work around some typing issues.
 
 =item C<--pg-copy=128>
 
@@ -466,10 +470,10 @@ The possibly schema-qualified table to use for comparison.
 No default for first connection.
 Default is same as first connection for second connection.
 
-Note that MySQL does not have I<schemas>, but strangely enough
-their I<database> concept is just like a I<schema>,
-so MySQL really does not have I<databases>, although there is
-something of that name. Am I clear?
+Note that MySQL does not have I<schemas>, so the schema part must be empty.
+However, strangely enough, their I<database> concept is just like a
+I<schema>, so one could say that MySQL really does not have I<databases>,
+although there is something of that name. Am I clear?
 
 =item B<keys>
 
@@ -574,6 +578,75 @@ It must be deleted from 2 to synchronize it wrt table 1.
 In case of tuple checksum collisions, false negative results may occur.
 Changing the checksum function would help in such cases.
 See the ANALYSIS sub-section.
+
+=head1 INSTALL
+
+This section describes how to install extensions (functions, casts, aggregates)
+needed by pg_comparator for the different target databases.
+
+First, get pg_comparator
+L<sources|http://www.coelho.net/pg_comparator/pg_comparator-@VERSION@.tgz>.
+
+=head2 PostgreSQL
+
+For installing on PostgreSQL, you must ensure that the C<pg_config> command
+found in your path is the one of the target PostgreSQL server, and that
+development packages are installed.
+
+Then compile and install the extensions' shared objects:
+
+  sh> make pgsql_install
+
+To load the extension files into the target C<DB> database,
+where C<...> are the connection options:
+
+  sh> psql ... -c 'CREATE EXTENSION pgcmp' DB
+
+To uninstall:
+
+  sh> psql ... -c 'DROP EXTENSION pgcmp' DB
+  sh> make pgsql_uninstall
+
+=head2 MySQL
+
+For installing on MySQL, you must ensure that the C<mysql_config> command
+found in your path is the one of the target MySQL server, and that
+development packages are installed.
+
+Then compile and install the extensions' shared objects:
+
+  sh> make mysql_install
+
+And load the extension files into the database:
+
+  sh> mysql ... < PATH-TO-EXTENSION/mysql_casts.sql
+  sh> mysql ... < PATH-TO-EXTENSION/mysql_checksum.sql
+
+See C<mysql_config --plugindir> for the extension directory path.
+On some systems C<PATH-TO-EXTENSION> might be C</usr/lib/mysql/contrib>.
+
+To uninstall:
+
+  sh> make mysql_uninstall
+
+=head2 SQLite
+
+For installing with SQLite, the corresponding development package is needed.
+
+First compile and install the extensions' shared objects (you
+may adjust C<SQLITE.libdir> make variable to change the target directory,
+which is by default C</usr/local/lib>):
+
+  sh> make sqlite_install
+
+Then load the extension by executing (to do it always, you may
+append the line to your C<.sqliterc> file):
+
+  SELECT load_extension('/usr/local/lib/sqlite_checksum.so');
+
+To uninstall:
+
+  sh> make sqlite_uninstall
 
 =head1 DEPENDENCES
 
@@ -965,9 +1038,6 @@ L<Altova Database Spy|http://www.altova.com/databasespy/>
 L<AUI Soft SQLMerger|http://auisoft.com/sqlmerger/>
 
 =item *
-L<Citrus Tech Data Comparison|http://www.citrustechnology.com/solutions/data-comparison>
-
-=item *
 L<Clever Components dbcomparer|http://www.clevercomponents.com/products/dbcomparer/>
 
 =item *
@@ -977,7 +1047,10 @@ L<Comparezilla|http://comparezilla.sourceforge.net/>
 L<Datanamic Datadiff|http://www.datanamic.com/datadiff/>
 
 =item *
-L<DB Balance|http://www.dbbalance.com/db_comparison.htm>
+L<DB Balance|http://www.dbbalance.com/db_cmp_pro.htm>
+
+=item *
+L<DBConvert|https://dbconvert.com/postgresql/>
 
 =item *
 L<DBSolo datacomp|http://www.dbsolo.com/datacomp.html>
@@ -989,16 +1062,10 @@ L<dbForge Data Compare|http://www.devart.com/dbforge/sql/datacompare/>
 L<DiffKit|http://www.diffkit.org/>
 
 =item *
-L<DKGAS DBDiff|http://www.dkgas.com/dbdiff.htm>
+L<Percona Toolkit|https://www.percona.com/software/mysql-tools/percona-toolkit>
 
 =item *
-L<Maakit mk-table-sync|http://code.google.com/p/maatkit/>
-
-=item *
-L<MySQL DBCompare|http://dev.mysql.com/doc/workbench/en/mysqldbcompare.html>
-
-=item *
-L<List of SQL Server Tools|http://www.programurl.com/software/sql-server-comparison.htm>
+L<MySQL DBCompare|https://dev.mysql.com/doc/mysql-utilities/1.6/en/mysqldbcompare.html>
 
 =item *
 L<SQL Server tablediff Utility|http://msdn.microsoft.com/en-US/library/ms162843.aspx>
@@ -1013,13 +1080,16 @@ L<Spectral Core OmegaSync|http://www.spectralcore.com/omegasync/>,
 L<SQL Delta|http://www.sqldelta.com/>
 
 =item *
+L<SQLite sqldiff|https://www.sqlite.org/sqldiff.html>
+
+=item *
 L<AlfaAlfa SQL Server Comparison Tool|http://www.sql-server-tool.com/>
 
 =item *
 L<SQLyog MySQL GUI|http://www.webyog.com/>
 
 =item *
-L<xSQL Software Data Compare|http://www.xsqlsoftware.com/Product/Sql_Data_Compare.aspx>
+L<xSQL Software Data Compare|http://www.xsql.com/products/sql_server_data_compare/>
 
 =back
 
@@ -1121,25 +1191,37 @@ cannot use pg_comparator to compare table contents on a synchronized replica.
 
 Allow larger checksum sizes.
 
-Make it a PostgreSQL extension.
-
 Add an option to avoid IN (x,y,...) syntax, maybe with a temporary table
 to hold values and use a JOIN on that. I'm not sure about the performance
 implications, though.
 
+Allow to generate the SQL update script without applying it.
+
+Option to generate more compact updates, i.e. only update attributes with
+different values.
+
 =head1 VERSIONS
 
 See L<web site|http://www.coelho.net/pg_comparator/> for the latest version.
-Although versions are managed really with SVN, there is also a
+Although versions are really managed with SVN, there is also a
 L<github repos|https://github.com/zx80/pg_comparator>.
 
 =over 4
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
-Documentation updates.
-
 In development.
+
+=item B<version 2.3.0> (r1569 on 2017-06-07)
+
+Add new L</"INSTALL"> Section.
+Turn cast, functions and aggregates into a PostgreSQL extension.
+Fix C<--where> handling when C<--tcs> is used, reported by I<Kenneth Hammink>.
+Add C<--pg-text-cast> option to work around missing implicit casts, issue
+reported by Saulius Grigaitis.
+Documentation updates.
+The I<release> validation was run successfully
+on PostgreSQL 9.6.3 and MySQL 5.7.18.
 
 =item B<version 2.2.6> (r1540 on 2015-04-18)
 
@@ -1435,7 +1517,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1544 $';
+my $revision = '$Revision: 1572 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1450,7 +1532,7 @@ my ($factor, $expect_warn) = (7, 0);
 my ($skip_inserts, $skip_updates, $skip_deletes) = (0, 0, 0);
 # condition, tests, max size of blobs, data sources...
 my ($expect, $longreadlen, $source1, $source2, $key_cs, $tup_cs, $do_lock,
-    $env_pass, $max_report, $stats, $pg_copy);
+    $env_pass, $max_report, $stats, $pg_copy, $pg_text_cast);
 
 # algorithm defaults
 # hmmm... could rely on base64 to handle binary keys?
@@ -1574,9 +1656,18 @@ sub firebird_null_template($$$) {
   die "unexpected null $null";
 }
 
+sub text_cast($) {
+  my ($list) = @_;
+  my @l = ();
+  for my $i (@$list) {
+    push @l, "(($i)::TEXT)";
+  }
+  return @l;
+}
+
 sub bb_concat($$) {
   my ($sep, $list) = @_;
-  return join("||'$sep'||", @$list);
+  return join("||'$sep'||", ($pg_text_cast? text_cast($list): @$list));
 }
 
 sub mysql_concat($$) {
@@ -2574,6 +2665,8 @@ sub compute_summary($$$$$$@)
                  &{$M{$db}{andop}}($kcs, $masks[$level]) . " AS kcs, " .
                   $M{$db}{$agg} . "(${tcs}) AS tcs " .
 	       "FROM ${from} " .
+	       # apply where only now, if T0 was not built
+	       ($tup_cs && $where && $level == 1? "WHERE $where ": "") .
 	       # the "& mask" is really a modulo operation
 	       "GROUP BY " . &{$M{$db}{andop}}(${kcs}, $masks[$level]);
   if ($M{$db}{create_as}) {
@@ -2929,7 +3022,8 @@ GetOptions(
   # misc
   "long-read-len|lrl|L=i" => \$longreadlen,
   "version|V" => sub { print "$0 version is $script_version\n"; exit 0; },
-  "pg-copy:i" => \$pg_copy
+  "pg-copy:i" => \$pg_copy,
+  "pg-text-cast" => \$pg_text_cast
 ) or die "$! (try $0 --help)";
 
 # propagate expect specification

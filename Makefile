@@ -1,4 +1,4 @@
-# $Id: Makefile 1528 2014-08-04 07:09:24Z coelho $
+# $Id: Makefile 1557 2015-08-17 07:44:52Z coelho $
 
 #
 # PostgreSQL stuff
@@ -6,14 +6,12 @@
 
 name		= pg_comparator
 
+EXTENSION	= pgcmp
 SCRIPTS		= $(name)
-MODULES		= pgc_checksum pgc_casts
-DATA_built	= $(MODULES:%=%.sql)
-DATA		= xor_aggregate.sql
-DOCS		= README.$(name) \
-		  README.xor_aggregate \
-		  README.pgc_checksum \
-		  README.pgc_casts
+MODULES		= $(EXTENSION)
+DATA_built	= $(name)
+DATA		= pgcmp--3.0.sql
+DOCS		= README.$(name)
 
 EXTRA_CLEAN	= $(name).1 $(name).html pod2htm?.tmp
 
@@ -33,7 +31,7 @@ $(name).html: $(name)
 	touch -r $< $@
 
 # dependencies
-pgc_checksum.o: jenkins.c fnv.c
+pgcmp.o: jenkins.c fnv.c
 
 pgsql_install: install
 pgsql_uninstall: uninstall
