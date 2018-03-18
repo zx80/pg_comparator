@@ -1,7 +1,11 @@
+* doc
+
 * extend
 - libdbd-firebird-perl: FireBird
 - libdbd-sybase-perl: Sybase & MS SQL server
 - others?
+- handle multiple tables, to deal with FK constraints?
+  "SET CONSTRAINTS ALL DEFERRED;" might prove useful.
 
 * table hash utility?
 - for read-only replica...

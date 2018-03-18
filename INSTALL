@@ -7,9 +7,10 @@ With version 8.0 or better, simply use the pgxs GNU makefile provided:
 You must only ensure that the "pg_config" found in your path is the one
 of the target postgresql server, and that development packages are installed.
 
-Then load the needed extensions (casts, checksum functions, xor aggregate):
+Then load the needed extensions (casts, checksum functions, xor aggregate),
+create the pgcmp extension:
 
-	sh> cat pgc_*.sql xor_aggregate.sql | psql ...
+	psql> CREATE EXTENSION pgcmp;
 
 To uninstall, do:
 

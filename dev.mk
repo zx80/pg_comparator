@@ -1,4 +1,4 @@
-# $Id: dev.mk 1486 2014-01-08 21:32:47Z coelho $
+# $Id: dev.mk 1580 2017-07-07 09:12:27Z coelho $
 
 # script distribution
 dir	= $(name)
@@ -12,7 +12,7 @@ F.c	= $(wildcard *.c)
 F.sql	= $(wildcard *.sql)
 F.in	= $(wildcard *.in)
 # $(DATA): already in $(F.sql)
-F.dist 	= $(F.c) $(F.sql) $(F.in) $(DOCS) $(name) \
+F.dist 	= $(F.c) $(F.sql) $(DOCS) $(name) pgcmp.control \
 		INSTALL LICENSE Makefile
 
 # default target

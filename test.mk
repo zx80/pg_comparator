@@ -1,5 +1,5 @@
 #
-# $Id: test.mk 1522 2014-08-03 11:48:21Z coelho $
+# $Id: test.mk 1567 2017-07-06 14:55:40Z coelho $
 #
 # run pg_comparator validation checks
 #
@@ -207,7 +207,7 @@ fast:
 
 # this is scripted rather than relying on dependencies
 # so that error messages are clearer
-.PHONY: fast_pg fast_my fast_mix fast_lite
+.PHONY: fast_pg fast_my fast_mix fast_lite fast_firebird
 fast_pg: fast
 fast_my: fast
 fast_mix: xor=sum

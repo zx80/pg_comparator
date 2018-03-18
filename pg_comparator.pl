@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1582 2017-07-07 10:21:41Z coelho $
+# $Id: pg_comparator.pl 1583 2017-07-07 10:34:21Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -1210,6 +1210,10 @@ L<github repos|https://github.com/zx80/pg_comparator>.
 
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
+In development.
+
+=item B<version 2.3.1> (r1582 on 2017-07-07)
+
 Fix spelling errors in the documentation, reported by I<Bas Couwenberg>.
 Fix distribution C<Makefile>.
 
@@ -1518,7 +1522,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1582 $';
+my $revision = '$Revision: 1583 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS

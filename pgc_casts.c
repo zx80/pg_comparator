@@ -1,4 +1,4 @@
-/* $Id: pgc_casts.c 1022 2010-08-06 07:28:07Z fabien $
+/* $Id: pgc_casts.c 1586 2018-03-18 09:26:31Z coelho $
  *
  * additional cast functions.
  */
@@ -87,7 +87,7 @@ Datum varbittobytea(PG_FUNCTION_ARGS)
   PG_RETURN_BYTEA_P(result);
 }
 
-// hmmm... I'm quite unsure about bit order and so...
+// hmmm... I'm quite unsure about byte order and so...
 Datum varbittoint2(PG_FUNCTION_ARGS)
 {
   VarBit *arg = PG_GETARG_VARBIT_P(0);
