@@ -2093,7 +2093,7 @@ sub parse_conn($)
   if ("$auth") {
     # parse authority if non empty. ??? url-translation?
     die "invalid authority string '$auth'\n"
-      unless $auth =~ /^((\w+)         # login
+      unless $auth =~ /^(([\w-]+)      # login
 			 (:([^.]*)     # :password
 			  )?\@)?       # @ => auth string is before
 		       ([^\@:\/]*)     # host
@@ -2130,7 +2130,7 @@ sub parse_conn($)
       # accept postgresql (") and mysql (`) name quotes in table.
       die "invalid path string '$path'\n"
         unless $path =~ /
-          ^(\w+)?                                   # base
+          ^([\w-]+)?                                # base
            (\/((\w+\.|\"[^\"]+\"\.|\`[^\`]+\`\.)?   # schema.
                (\w+|\"[^\"]+\"|\`[^\`]+\`)))?       # table
            (\?(.+))?                                # key,part:column,list...
