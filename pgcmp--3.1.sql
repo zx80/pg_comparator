@@ -1,5 +1,5 @@
 --
--- $Id: pgcmp--3.0.sql 1554 2015-08-17 07:22:40Z coelho $
+-- $Id: pgcmp--3.1.sql 1594 2020-11-03 15:31:20Z coelho $
 --
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION

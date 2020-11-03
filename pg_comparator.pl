@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# $Id: pg_comparator.pl 1583 2017-07-07 10:34:21Z coelho $
+# $Id: pg_comparator.pl 1596 2020-11-03 15:42:17Z coelho $
 #
 # HELP 1: pg_comparator --man
 # HELP 2: pod2text pg_comparator
@@ -961,15 +961,15 @@ with primary key I<id> and non null contents I<data>, then their
 differences, that is how I<T2> differs from the reference I<T1>,
 is summarized by the following query:
 
-	SELECT COALESCE(T1.id, T2.id) AS key,
-	  CASE WHEN T1.id IS NULL THEN 'DELETE'
-	       WHEN T2.id IS NULL THEN 'INSERT'
-	       ELSE 'UPDATE'
-	  END AS operation
-	FROM T1 FULL JOIN T2 USING (id)
-	WHERE T1.id IS NULL      -- DELETE
-	   OR T2.id IS NULL      -- INSERT
-	   OR T1.data <> T2.data -- UPDATE
+        SELECT COALESCE(T1.id, T2.id) AS key,
+          CASE WHEN T1.id IS NULL THEN 'DELETE'
+               WHEN T2.id IS NULL THEN 'INSERT'
+               ELSE 'UPDATE'
+          END AS operation
+        FROM T1 FULL JOIN T2 USING (id)
+        WHERE T1.id IS NULL      -- DELETE
+           OR T2.id IS NULL      -- INSERT
+           OR T1.data <> T2.data -- UPDATE
 
 =head2 REFERENCES
 
@@ -1211,6 +1211,14 @@ L<github repos|https://github.com/zx80/pg_comparator>.
 =item B<version @VERSION@> (r@REVISION@ on @DATE@)
 
 In development.
+
+=item B<version 2.3.2> (r1594 on 2020-11-03)
+
+Accept dash character ("-") in login and database names,
+submitted by I<Piotr Boniecki>.
+Fix quoting of values when synchronizing with copy,
+reported by I<Luis Gonzales Sotelino>.
+Add C<module_pathname> to Postgres extension control file.
 
 =item B<version 2.3.1> (r1582 on 2017-07-07)
 
@@ -1522,7 +1530,7 @@ saying so. See my webpage for current address.
 =cut
 
 my $script_version = '@VERSION@ (r@REVISION@)';
-my $revision = '$Revision: 1583 $';
+my $revision = '$Revision: 1596 $';
 $revision =~ tr/0-9//cd;
 
 ################################################################# SOME DEFAULTS
@@ -1768,9 +1776,9 @@ sub sqlite_initialize($)
     require Digest::MD5;
     $dbh->sqlite_create_function("PGC_MD5", 2,
       sub {
-	my ($bytes, $data) = @_;
-	my $fmt = $bytes==2? 'x14s': $bytes==4? 'x12l': 'x8q';
-	return unpack($fmt, Digest::MD5::md5($data));
+        my ($bytes, $data) = @_;
+        my $fmt = $bytes==2? 'x14s': $bytes==4? 'x12l': 'x8q';
+        return unpack($fmt, Digest::MD5::md5($data));
       });
   }
 }
@@ -1790,6 +1798,11 @@ sub pgsql_lock($$) {
 
 sub mysql_lock($$) { # for mysql... locks are seen as a weak transaction tool
   my ($t, $ro) = @_; return "LOCK TABLES $t " . ($ro? 'READ': 'WRITE');
+}
+
+sub quote_tuple($@) {
+  my ($dbh, @values) = @_;
+  return '(' . (join ',', map { $dbh->quote($_) } @_) . ')';
 }
 
 # define all database specific "attributes" and "methods"
@@ -1855,10 +1868,10 @@ my %M = (
     # sql checksum for one attribute: cksum{$algo}($size, $att)
     'ckoneatt' => {
       'md5' => sub { my ($sz, $att) = @_;
-	return pgsql_cast(
-	  "COALESCE(DECODE(MD5(${att}::TEXT),'hex'),''::BYTEA)" .
-	  "::BIT(" .  8*$sz . ")", $sz);
-	},
+        return pgsql_cast(
+          "COALESCE(DECODE(MD5(${att}::TEXT),'hex'),''::BYTEA)" .
+          "::BIT(" .  8*$sz . ")", $sz);
+        },
       'ck' => sub { my ($sz, $att) = @_; return "CKSUM$sz(${att}::TEXT)"; },
       'fnv' => sub { my ($sz, $att) = @_; return "FNV$sz(${att}::TEXT)"; }
     },
@@ -1911,13 +1924,13 @@ my %M = (
     'ckoneatt' => {
       'md5' => sub { my ($sz, $att) = @_;
         return mysql_cast(
-	  "COALESCE(CONV(LEFT(MD5($att),". 2*$sz ."),16,10),0)", $sz);
-	},
+          "COALESCE(CONV(LEFT(MD5($att),". 2*$sz ."),16,10),0)", $sz);
+        },
       'ck' => sub { my ($sz, $att) = @_;
-	return "CKSUM$sz(CAST($att AS BINARY))"
+        return "CKSUM$sz(CAST($att AS BINARY))"
       },
       'fnv' => sub { my ($sz, $att) = @_;
-	return "FNV$sz(CAST($att AS BINARY))"
+        return "FNV$sz(CAST($att AS BINARY))"
       }
     },
     'cksum' => \&mysql_cksum_template,
@@ -1964,7 +1977,7 @@ my %M = (
     'ckoneatt' => {
       'md5' => sub { my ($sz, $att) = @_;
         return "PGC_MD5($sz, CAST($att AS TEXT))";
-	},
+        },
       'ck' => sub { my ($sz, $att) = @_;
         return "CKSUM$sz(CAST($att AS TEXT))";
       },
@@ -2039,8 +2052,8 @@ my %M = (
     'ckoneatt' => {
       'md5' => sub { die "MD5 not implemented with firebird"; },
       'ck' => sub {
-	my ($sz, $att) = @_;
-	return firebird_cast("HASH($att)", $sz);
+        my ($sz, $att) = @_;
+        return firebird_cast("HASH($att)", $sz);
       }
     },
     # sql checksum template: cksum($algo, $size)
@@ -2093,12 +2106,12 @@ sub parse_conn($)
   if ("$auth") {
     # parse authority if non empty. ??? url-translation?
     die "invalid authority string '$auth'\n"
-      unless $auth =~ /^((\w+)         # login
-			 (:([^.]*)     # :password
-			  )?\@)?       # @ => auth string is before
-		       ([^\@:\/]*)     # host
-		       (:(\d+))?$      # :port
-		      /x;
+      unless $auth =~ /^(([-\w]+)      # login
+                         (:([^.]*)     # :password
+                          )?\@)?       # @ => auth string is before
+                       ([^\@:\/]*)     # host
+                       (:(\d+))?$      # :port
+                      /x;
 
     $user=$2 if defined $1;
     $pass=$4 if defined $3;
@@ -2116,10 +2129,10 @@ sub parse_conn($)
       # if so, the last "/" is mandatory to mark the table name
       die "invalid path string '$path'\n"
         unless $path =~ /
-	  ^((.*)                    # base file (longest) path
-	    \/(\w+|\"[^\"+]\")?)?   # table
-	  (\?(.+))?                 # key,part:column,list...
-	/x;
+          ^((.*)                    # base file (longest) path
+            \/(\w+|\"[^\"+]\")?)?   # table
+          (\?(.+))?                 # key,part:column,list...
+        /x;
       $base = $2 if defined $2;
       $tabl = $3 if defined $3;
       $kc_str = $5 if defined $5;
@@ -2130,7 +2143,7 @@ sub parse_conn($)
       # accept postgresql (") and mysql (`) name quotes in table.
       die "invalid path string '$path'\n"
         unless $path =~ /
-          ^(\w+)?                                   # base
+          ^([-\w]+)?                                # base
            (\/((\w+\.|\"[^\"]+\"\.|\`[^\`]+\`\.)?   # schema.
                (\w+|\"[^\"]+\"|\`[^\`]+\`)))?       # table
            (\?(.+))?                                # key,part:column,list...
@@ -2145,20 +2158,20 @@ sub parse_conn($)
       my $in_cols = 0;
       my ($k, $c, @k, @c);
       while ($kc_str =~
-	/(\w+                      # simple identifier
+        /(\w+                      # simple identifier
          |\"[^\"]*(\"\"[^\"]*)*\"  # pgsql quoted identifier
          |\`[^\`]*(\`\`[^\`]*)*\`  # mysql quoted identifier
          )([,:]?)/xg)
       {
-	if ($in_cols) {
-	  push @c, $1; $c++;
-	}
-	else {
-	  push @k, $1; $k++;
-	}
-	die "':' key and column separation already seen"
-	    if $4 eq ':' and $in_cols;
-	$in_cols=1 if $4 eq ':';
+        if ($in_cols) {
+          push @c, $1; $c++;
+        }
+        else {
+          push @k, $1; $k++;
+        }
+        die "':' key and column separation already seen"
+            if $4 eq ':' and $in_cols;
+        $in_cols=1 if $4 eq ':';
       }
       $keys = [@k] if $k;
       $cols = [@c] if $in_cols;
@@ -2199,7 +2212,7 @@ sub dbh_serialize($$)
     async_wait($dbh, $db, 'serialize') if $async;
     # then serialize
     $_[0] = $dbh->take_imp_data
-	or die $dbh->errstr;
+        or die $dbh->errstr;
   }
 }
 
@@ -2211,8 +2224,8 @@ sub dbh_materialize($$)
   if ($threads) {
     verb 5, "materializing db=$db";
     $_[0] = DBI->connect($M{$db}{driver}, undef, undef,
-			 { 'dbi_imp_data' => $dbh })
-	or die $DBI::errstr;
+                         { 'dbi_imp_data' => $dbh })
+        or die $DBI::errstr;
   }
 }
 
@@ -2278,7 +2291,7 @@ sub conn($$$$$$$$$)
   # actual connection
   verb 3, "connecting to s=$s u=$u";
   my $dbh = DBI->connect($s, $u, $w,
-		{ RaiseError => 1, PrintError => 0, AutoCommit => 1 })
+                { RaiseError => 1, PrintError => 0, AutoCommit => 1 })
       or die $DBI::errstr;
   verb 4, "connected to $u\@$h:$p/$b";
 
@@ -2385,7 +2398,7 @@ sub get_column_info($$$)
     verb 6, "column_info: $db $base $table $col" if $debug;
     my $sth =
       $dbh->column_info($base, &{$M{$db}{tableid}}($table),
-			&{$M{$db}{unquote}}($col));
+                        &{$M{$db}{unquote}}($col));
     die "column_info not implemented by driver" unless defined $sth;
     my $h = $sth->fetchrow_hashref();
     die "column information not returned" unless defined $h;
@@ -2496,7 +2509,7 @@ sub ckatts($$$$)
   if (@$atts > 1) {
     # several attributes
     return join '', subs(&{$M{$db}{cksum}}($algo, $sz),
-			 &{$M{$db}{concat}}($sep, $atts));
+                         &{$M{$db}{concat}}($sep, $atts));
   }
   else {
     # checksum one attribute
@@ -2561,9 +2574,9 @@ sub build_cs_table($$$$$$$$)
   {
     $count =
       sql_do($dbh, $db,
-	     "CREATE " .
-	     ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
-	     "TABLE ${name}0 AS $build_checksum");
+             "CREATE " .
+             ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
+             "TABLE ${name}0 AS $build_checksum");
     # count should be available somewhere,
     # but alas does not seem to be returned by do("CREATE TABLE ... AS ... ")
     # by pgsql, although it is returned by mysql
@@ -2571,21 +2584,21 @@ sub build_cs_table($$$$$$$$)
   elsif ($ckcmp eq 'insert' or not $M{$db}{create_as})
   {
     sql_do($dbh, $db,
-	   "CREATE ".
-	   ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
-	   "TABLE ${name}0 (".
-	   # KEY CHECKSUM NN?
-	   'kcs ' .
+           "CREATE ".
+           ($temp? $M{$db}{temporary}: $unlog? $M{$db}{unlogged}: '') .
+           "TABLE ${name}0 (".
+           # KEY CHECKSUM NN?
+           'kcs ' .
        ($usekey? col_type($dbh, $dhpbt, $db, "@$pkeys"): $M{$db}{cktype}{4}) .
-	   # TUPLE CHECKSUM NN?
-	   ' NOT NULL, tcs ' . $M{$db}{cktype}{$checksize} . ' NOT NULL' .
-	   # KEY...
-	   ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'DECL')) .
-	   ");");
+           # TUPLE CHECKSUM NN?
+           ' NOT NULL, tcs ' . $M{$db}{cktype}{$checksize} . ' NOT NULL' .
+           # KEY...
+           ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'DECL')) .
+           ");");
     $count =
       sql_do($dbh, $db, "INSERT INTO ${name}0(kcs, tcs" .
-	    ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'LIST')) .
-	     ") ". $build_checksum);
+            ($usekey? '': ', ' . key_pk_get($dbh, $dhpbt, $db, $keys, 'LIST')) .
+             ") ". $build_checksum);
   }
   else {
     die "unexpect checksum computation variant: $ckcmp";
@@ -2669,18 +2682,18 @@ sub compute_summary($$$$$$@)
   my $select = "SELECT " .
                  &{$M{$db}{andop}}($kcs, $masks[$level]) . " AS kcs, " .
                   $M{$db}{$agg} . "(${tcs}) AS tcs " .
-	       "FROM ${from} " .
-	       # apply where only now, if T0 was not built
-	       ($tup_cs && $where && $level == 1? "WHERE $where ": "") .
-	       # the "& mask" is really a modulo operation
-	       "GROUP BY " . &{$M{$db}{andop}}(${kcs}, $masks[$level]);
+               "FROM ${from} " .
+               # apply where only now, if T0 was not built
+               ($tup_cs && $where && $level == 1? "WHERE $where ": "") .
+               # the "& mask" is really a modulo operation
+               "GROUP BY " . &{$M{$db}{andop}}(${kcs}, $masks[$level]);
   if ($M{$db}{create_as}) {
     sql_do($dbh, $db, "$create_table AS $select");
   }
   else { # create + insert
     sql_do($dbh, $db,
-	   "$create_table(kcs $M{$db}{cktype}{4}, " .
-	                 "tcs $M{$db}{cktype}{$checksize})");
+           "$create_table(kcs $M{$db}{cktype}{4}, " .
+                         "tcs $M{$db}{cktype}{$checksize})");
     sql_do($dbh, $db, "INSERT INTO ${name}${level}(kcs,tcs) $select");
   }
 }
@@ -2715,7 +2728,7 @@ sub selkcs($$$$$@)
       "SELECT $kcs AS kcs, $tcs AS tcs" .
         # if kcs==pk, do not transfer the key
         (($get_key and not $usekey)?
-	 ', ' . key_pk_get(0, 0, $db, $skey, $tup_cs? 'AS': 'LIST'): '') .
+         ', ' . key_pk_get(0, 0, $db, $skey, $tup_cs? 'AS': 'LIST'): '') .
       " FROM $table ";
   # the "& mask" is really a modulo operation
   $query .= "WHERE " . &{$M{$db}{andop}}($kcs, $mask) .
@@ -2822,9 +2835,9 @@ sub differences($$$$$$$$$$@)
 
     if ($max_report && $level>0 && @kcs>$max_report) {
       print "giving up at level $level: too many differences.\n" .
-	    "\tadjust --max-ratio option to proceed " .
-	    "(current ratio is $max_ratio, $max_report diffs)\n" .
-	    "\tkcs list length is " . scalar @kcs . ": @kcs\n";
+            "\tadjust --max-ratio option to proceed " .
+            "(current ratio is $max_ratio, $max_report diffs)\n" .
+            "\tkcs list length is " . scalar @kcs . ": @kcs\n";
       dbh_serialize($dbh1, $db1);
       dbh_serialize($dbh2, $db2);
       return;
@@ -2850,93 +2863,93 @@ sub differences($$$$$$$$$$@)
     {
       # update current lists if necessary
       if (not defined $kcs1 and $s1->{Active}) {
-	($kcs1, $tcs1, @key1) = $s1->fetchrow_array();
-	if (defined $kcs1) { # new row
-	  @key1 = ($kcs1) if !$level and $usekey; # fix key, not transferred
-	  $level? $query_fr++: $query_fr0++;
-	  #print "read 1: $kcs1, $tcs1", defined $key1? $key1:'', "\n";
-	}
+        ($kcs1, $tcs1, @key1) = $s1->fetchrow_array();
+        if (defined $kcs1) { # new row
+          @key1 = ($kcs1) if !$level and $usekey; # fix key, not transferred
+          $level? $query_fr++: $query_fr0++;
+          #print "read 1: $kcs1, $tcs1", defined $key1? $key1:'', "\n";
+        }
       }
       if (not defined $kcs2 and $s2->{Active}) {
-	($kcs2, $tcs2, @key2) = $s2->fetchrow_array();
-	if (defined $kcs2) { # new row
-	  @key2 = ($kcs2) if !$level and $usekey; # fix key, not transferred
-	  $level? $query_fr++: $query_fr0++;
-	  #print "read 2: $kcs2, $tcs2", defined $key2? $key2:'', "\n";
-	}
+        ($kcs2, $tcs2, @key2) = $s2->fetchrow_array();
+        if (defined $kcs2) { # new row
+          @key2 = ($kcs2) if !$level and $usekey; # fix key, not transferred
+          $level? $query_fr++: $query_fr0++;
+          #print "read 2: $kcs2, $tcs2", defined $key2? $key2:'', "\n";
+        }
       }
       # nothing left on both side, merge is complete
       last unless defined $kcs1 or defined $kcs2;
       verb 6, "merging: $kcs1,$tcs1,@key1 / $kcs2,$tcs2,@key2" if $debug;
       # else at least one of the list contains something
       if (# we are dealing with two tuples
-	  defined $kcs1 and defined $kcs2 and
-	  # their key checksums are equal
-	  $kcs1==$kcs2 and
-	  # for level 0, the keys are also equal
-	  ($level or list_cmp(@key1,@key2)==0))
+          defined $kcs1 and defined $kcs2 and
+          # their key checksums are equal
+          $kcs1==$kcs2 and
+          # for level 0, the keys are also equal
+          ($level or list_cmp(@key1,@key2)==0))
       {
-	die "unexpected undefined tuple checksum" # if not null is wrong...
-	  unless defined $tcs1 and defined $tcs2;
-	if ($tcs1 ne $tcs2) { # but non matching checksums
-	  if ($level) {
-	    push @next_kcs, $kcs1; # to be investigated at next level...
-	  } else {
-	    # the level-0 table keeps the actual key
-	    $count ++;
-	    push @update, [@key1];
-	    print "UPDATE @key1\n" if $report; # final result
-	  }
-	}
-	# else the tuple checksums match, nothing to do!
-	# both tuples are consummed
-	undef $kcs1; undef $tcs1; undef @key1;
-	undef $kcs2; undef $tcs2; undef @key2;
+        die "unexpected undefined tuple checksum" # if not null is wrong...
+          unless defined $tcs1 and defined $tcs2;
+        if ($tcs1 ne $tcs2) { # but non matching checksums
+          if ($level) {
+            push @next_kcs, $kcs1; # to be investigated at next level...
+          } else {
+            # the level-0 table keeps the actual key
+            $count ++;
+            push @update, [@key1];
+            print "UPDATE @key1\n" if $report; # final result
+          }
+        }
+        # else the tuple checksums match, nothing to do!
+        # both tuples are consummed
+        undef $kcs1; undef $tcs1; undef @key1;
+        undef $kcs2; undef $tcs2; undef @key2;
       }
       # if they do not match, one is missing or less than the other
       elsif (# right side is empty, only something on the left side
-	     not defined $kcs2 or
-	     # or the left side id checksum is less than right side
-	     (defined $kcs1 and ($kcs1<$kcs2 or
-	       # or special case for level 0 on kcs collision
-	       (not $level and $kcs1==$kcs2 and list_cmp(@key1,@key2)<0))))
+             not defined $kcs2 or
+             # or the left side id checksum is less than right side
+             (defined $kcs1 and ($kcs1<$kcs2 or
+               # or special case for level 0 on kcs collision
+               (not $level and $kcs1==$kcs2 and list_cmp(@key1,@key2)<0))))
       {
-	# more kcs (/key) in table 1
-	if ($level) {
-	  # a whole chunck is empty on the right side, managed later
-	  push @mask_insert, "$kcs1/$masks[$#masks]";
-	} else {
-	  $count ++;
-	  push @insert, [@key1];
-	  print "INSERT @key1\n" if $report; # final result
-	}
-	# left tuple is consummed
-	undef $kcs1; undef $tcs1; undef @key1;
+        # more kcs (/key) in table 1
+        if ($level) {
+          # a whole chunck is empty on the right side, managed later
+          push @mask_insert, "$kcs1/$masks[$#masks]";
+        } else {
+          $count ++;
+          push @insert, [@key1];
+          print "INSERT @key1\n" if $report; # final result
+        }
+        # left tuple is consummed
+        undef $kcs1; undef $tcs1; undef @key1;
       }
       # this could be a else
       elsif (# left side is empty, only something in the right side
-	     not defined $kcs1 or
-	     # or the right side id checksum is less than left side
-	     (defined $kcs2 and ($kcs1>$kcs2 or
-	       # special case for level 0 on kcs collision
-	       (not $level and $kcs1==$kcs2 and list_cmp(@key1,@key2)>0))))
+             not defined $kcs1 or
+             # or the right side id checksum is less than left side
+             (defined $kcs2 and ($kcs1>$kcs2 or
+               # special case for level 0 on kcs collision
+               (not $level and $kcs1==$kcs2 and list_cmp(@key1,@key2)>0))))
       {
-	# more kcs in table 2
-	if ($level) {
-	  # a whole chunck is empty on the left side, managed later
-	  push @mask_delete, "$kcs2/$masks[$#masks]";
-	} else {
-	  $count ++;
-	  push @delete, [@key2];
-	  print "DELETE @key2\n" if $report; # final result
-	}
-	# right tuple is consummed
-	undef $kcs2; undef $tcs2; undef @key2;
+        # more kcs in table 2
+        if ($level) {
+          # a whole chunck is empty on the left side, managed later
+          push @mask_delete, "$kcs2/$masks[$#masks]";
+        } else {
+          $count ++;
+          push @delete, [@key2];
+          print "DELETE @key2\n" if $report; # final result
+        }
+        # right tuple is consummed
+        undef $kcs2; undef $tcs2; undef @key2;
       }
       else {
-	die "this state should never happen\n" .
-	  " - 1: $kcs1, $tcs1, @key1\n" .
-	  " - 2; $kcs2, $tcs2, @key2\n";
+        die "this state should never happen\n" .
+          " - 1: $kcs1, $tcs1, @key1\n" .
+          " - 2; $kcs2, $tcs2, @key2\n";
       }
     }
     # close queries
@@ -3327,12 +3340,12 @@ if ($threads)
   threads::shared::share(\$query_meta);
 
   ($thr1) = threads->new(\&build_conn,
-			 $db1, $b1, $h1, $p1, $u1, $w1, $source1, $t1, 1)
+                         $db1, $b1, $h1, $p1, $u1, $w1, $source1, $t1, 1)
     or die "cannot create thread 1-0";
 
   ($thr2) = threads->new(\&build_conn,
-			 $db2, $b2, $h2, $p2, $u2, $w2, $source2, $t2,
-			 !$synchronize)
+                         $db2, $b2, $h2, $p2, $u2, $w2, $source2, $t2,
+                         !$synchronize)
     or die "cannot create thread 2-0";
 
   verb 1, "waiting for connexions and counts...";
@@ -3343,7 +3356,7 @@ else
 {
   ($dbh1) = build_conn($db1, $b1, $h1, $p1, $u1, $w1, $source1, $t1, 1);
   ($dbh2) = build_conn($db2, $b2, $h2, $p2, $u2, $w2, $source2, $t2,
-		       !$synchronize);
+                       !$synchronize);
 }
 
 # get/set k/c defaults once connected
@@ -3447,11 +3460,11 @@ else # must compute checksum table
 {
   if ($threads) {
     ($thr1) = threads->new(\&compute_checksum, $dbh1, $dhpbt1, $db1, $t1,
-			   $k1, $pk1, $pc1, $name1, $size)
+                           $k1, $pk1, $pc1, $name1, $size)
       or die "cannot create thread 1-1";
 
     ($thr2) = threads->new(\&compute_checksum, $dbh2, $dhpbt2, $db2, $t2,
-			   $k2, $pk2, $pc2, $name2, $size)
+                           $k2, $pk2, $pc2, $name2, $size)
       or die "cannot create thread 2-1";
 
     verb 1, "waiting for connexions and possibly counts...";
@@ -3461,9 +3474,9 @@ else # must compute checksum table
   else { # no thread
     # CREATE TABLE & SELECT
     ($count1) = build_cs_table($dbh1, $dhpbt1, $db1, $t1,
-			       $k1, $pk1, $pc1, $name1);
+                               $k1, $pk1, $pc1, $name1);
     ($count2) = build_cs_table($dbh2, $dhpbt2, $db2, $t2,
-			       $k2, $pk2, $pc2, $name2);
+                               $k2, $pk2, $pc2, $name2);
     # SELECT COUNT
     if (not $size) {
       # decomposition is needed to take advantage of asynchronous queries
@@ -3528,11 +3541,11 @@ verb 1, "building summary tables...";
 if ($threads)
 {
   $thr1 = threads->new(\&compute_summaries, $dbh1, $db1,
-		       $name1, $t1, $k1, @masks)
+                       $name1, $t1, $k1, @masks)
     or die "cannot create thread 1-2";
 
   $thr2 = threads->new(\&compute_summaries, $dbh2, $db2,
-		       $name2, $t2, $k2, @masks)
+                       $name2, $t2, $k2, @masks)
     or die "cannot create thread 2-2";
 
   $thr1->join();
@@ -3559,7 +3572,7 @@ $tsum = [gettimeofday] if $stats;
 verb 1, "looking for differences...";
 my ($count, $ins, $upt, $del, $bins, $bdel) =
   differences($dbh1, $dbh2, $db1, $db2, $name1, $name2,
-	      $t1, $t2, $k1, $k2, @masks);
+              $t1, $t2, $k1, $k2, @masks);
 verb 2, "differences done";
 
 $tmer = [gettimeofday] if $stats;
@@ -3578,25 +3591,25 @@ if ((defined $bins and @$bins) or (defined $bdel and @$bdel))
   {
     # hmmm... thread is useless if the list is empty
     $thr1 = threads->new(\&get_bulk_keys, $dbh1, $db1,
-			 # table
-			 defined $tup_cs? $t1: "${name1}0",
-			 # key checksum attribute
-	        defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k1": 'kcs',
-			 # key attribute
-		defined $tup_cs? key_pk_get(0, 0, $db1, $k1, 'AS'):
-		  $usekey? 'kcs': key_pk_get(0, 0, $db1, $k1, 'LIST'),
-			 'INSERT', @$bins)
+                         # table
+                         defined $tup_cs? $t1: "${name1}0",
+                         # key checksum attribute
+                defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k1": 'kcs',
+                         # key attribute
+                defined $tup_cs? key_pk_get(0, 0, $db1, $k1, 'AS'):
+                  $usekey? 'kcs': key_pk_get(0, 0, $db1, $k1, 'LIST'),
+                         'INSERT', @$bins)
       or die "cannot create thread 1-3";
 
     $thr2 = threads->new(\&get_bulk_keys, $dbh2, $db2,
-			 # table
-			 defined $tup_cs? $t2: "${name2}0",
-			 # key checksum attribute
-		defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k2": 'kcs',
-			 # key attribute
-		defined $tup_cs? key_pk_get(0, 0, $db2, $k2, 'AS'):
-		  $usekey? 'kcs': key_pk_get(0, 0, $db2, $k2, 'LIST'),
-			 'DELETE', @$bdel)
+                         # table
+                         defined $tup_cs? $t2: "${name2}0",
+                         # key checksum attribute
+                defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k2": 'kcs',
+                         # key attribute
+                defined $tup_cs? key_pk_get(0, 0, $db2, $k2, 'AS'):
+                  $usekey? 'kcs': key_pk_get(0, 0, $db2, $k2, 'LIST'),
+                         'DELETE', @$bdel)
       or die "cannot create thread 2-3";
 
     $insb = $thr1->join();
@@ -3605,23 +3618,23 @@ if ((defined $bins and @$bins) or (defined $bdel and @$bdel))
   else
   {
     $insb = get_bulk_keys($dbh1, $db1,
-			  # table
-			  defined $tup_cs? $t1: "${name1}0",
-			  # key checksum attribute
-		defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k1": 'kcs',
-			  # key attribute
-		defined $tup_cs? key_pk_get(0, 0, $db1, $k1, 'AS'):
-		  $usekey? 'kcs': key_pk_get(0, 0, $db1, $k1, 'LIST'),
-			  'INSERT', @$bins);
+                          # table
+                          defined $tup_cs? $t1: "${name1}0",
+                          # key checksum attribute
+                defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k1": 'kcs',
+                          # key attribute
+                defined $tup_cs? key_pk_get(0, 0, $db1, $k1, 'AS'):
+                  $usekey? 'kcs': key_pk_get(0, 0, $db1, $k1, 'LIST'),
+                          'INSERT', @$bins);
     $delb = get_bulk_keys($dbh2, $db2,
-			  # table
-			  defined $tup_cs? $t2: "${name2}0",
-			  # key checksum attribute
-	        defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k2": 'kcs',
-			  # key attribute
-		defined $tup_cs? key_pk_get(0, 0, $db2, $k2, 'AS'):
-		  $usekey? 'kcs': key_pk_get(0, 0, $db2, $k2, 'LIST'),
-			  'DELETE', @$bdel);
+                          # table
+                          defined $tup_cs? $t2: "${name2}0",
+                          # key checksum attribute
+                defined $key_cs? $key_cs: ($usekey and $tup_cs)? "@$k2": 'kcs',
+                          # key attribute
+                defined $tup_cs? key_pk_get(0, 0, $db2, $k2, 'AS'):
+                  $usekey? 'kcs': key_pk_get(0, 0, $db2, $k2, 'LIST'),
+                          'DELETE', @$bdel);
   }
 
   # ??? fix?
@@ -3669,7 +3682,7 @@ if ($synchronize and
   if (@$del or @$delb or ($pg_copy and @$upt))
   {
     my $del_sql = "DELETE FROM $t2 WHERE " .
-	($where? "($where) AND ": '') . $where_k2;
+        ($where? "($where) AND ": '') . $where_k2;
     verb 2, $del_sql;
     my $del_sth = $dbh2->prepare($del_sql) if $do_it;
     my @alldels = ();
@@ -3696,16 +3709,15 @@ if ($synchronize and
     while (@allins) {
       my $bulk = '';
       for my $k (splice(@allins, 0, $pg_copy)) { # chunked
-	$bulk .= ',' if $bulk;
-	#$copy_bulk .= $dbh1->quote($k);
-	$bulk .= "(@$k)";
-	$query_data++;
+        $bulk .= ',' if $bulk;
+        $bulk .= quote_tuple(@$k);
+        $query_data++;
       }
       sql_do($dbh1, $db1, "COPY ($select$bulk)) TO STDOUT");
       #async_wait($dbh1, $db1, 'copy to 1') if $async;
       my $row = '';
       while (($dbh1->pg_getcopydata($row)) != -1) {
-	$dbh2->pg_putcopydata($row) if $do_it;
+        $dbh2->pg_putcopydata($row) if $do_it;
       }
     }
     $dbh2->pg_putcopyend();
@@ -3727,24 +3739,24 @@ if ($synchronize and
     if ((@$ins or @$insb) and not $skip_inserts)
     {
       my $ins_sql = "INSERT INTO $t2(" . join(',', @$c2, @$k2) . ") " .
-	'VALUES(?' . ',?' x (@$k2+@$c2-1) . ')';
+        'VALUES(?' . ',?' x (@$k2+@$c2-1) . ')';
       verb 2, $ins_sql;
       my $ins_sth = $dbh2->prepare($ins_sql) if $do_it;
       for my $i (@$ins, @$insb) {
-	$query_data++;
-	my @c1values = ();
-	# query the other column values for key $i
-	if ($c1 and @$c1) {
-	  sth_param_exec(1, "SELECT $t1", $val_sth, $i);
-	  @c1values = $val_sth->fetchrow_array();
-	  # hmmm... may be raised on blobs?
-	  die "unexpected values fetched for insert"
-	    unless @c1values and @c1values == @$c1;
+        $query_data++;
+        my @c1values = ();
+        # query the other column values for key $i
+        if ($c1 and @$c1) {
+          sth_param_exec(1, "SELECT $t1", $val_sth, $i);
+          @c1values = $val_sth->fetchrow_array();
+          # hmmm... may be raised on blobs?
+          die "unexpected values fetched for insert"
+            unless @c1values and @c1values == @$c1;
 
-	  &{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
-	}
-	# then insert the missing tuple
-	sth_param_exec($do_it, "INSERT $t2", $ins_sth, $i, @c1values);
+          &{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
+        }
+        # then insert the missing tuple
+        sth_param_exec($do_it, "INSERT $t2", $ins_sth, $i, @c1values);
       }
       #  $ins_sth
     }
@@ -3759,17 +3771,17 @@ if ($synchronize and
       my $upt_sth = $dbh2->prepare($upt_sql) if $do_it;
       for my $u (@$upt)
       {
-	$query_data++;
-	# get value for key $u
-	sth_param_exec(1, "SELECT $t1", $val_sth, $u);
-	my @c1values = $val_sth->fetchrow_array();
-	# hmmm... may be raised on blobs?
-	die "unexpected values fetched for update"
+        $query_data++;
+        # get value for key $u
+        sth_param_exec(1, "SELECT $t1", $val_sth, $u);
+        my @c1values = $val_sth->fetchrow_array();
+        # hmmm... may be raised on blobs?
+        die "unexpected values fetched for update"
         unless @c1values and @c1values == @$c1;
-	# use it to update the other table
-	sth_param_exec($do_it, "UPDATE $t2", $upt_sth, $u, @c1values);
+        # use it to update the other table
+        sth_param_exec($do_it, "UPDATE $t2", $upt_sth, $u, @c1values);
 
-	&{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
+        &{$M{$db1}{close_cursor}}($val_sth) if exists $M{$db1}{close_cursor};
       }
       # $upt_sth
     }
@@ -3802,9 +3814,9 @@ if ($clear)
   if ($threads)
   {
     $thr1 = threads->new(\&table_cleanup, $dbh1, $db1, $name1, $levels)
-	or die "cannot create thread 1-4";
+        or die "cannot create thread 1-4";
     $thr2 = threads->new(\&table_cleanup, $dbh2, $db2, $name2, $levels)
-	or die "cannot create thread 2-4";
+        or die "cannot create thread 2-4";
     $thr1->join();
     $thr2->join();
   }
@@ -3851,7 +3863,7 @@ if ($stats)
   my $tk1 = subs_null(&{$M{$db1}{null}}('text', 0, 0), $dbh1, $dhpbt1, $k1);
   $key_size = col_size($dbh1, $db1, $t1, $tk1);
   $col_size = col_size($dbh1, $db1, $t1,
-		       [subs(&{$M{$db1}{null}}('text', 0, 0), @$c1)]);
+                       [subs(&{$M{$db1}{null}}('text', 0, 0), @$c1)]);
 }
 
 # final stuff:
@@ -3911,7 +3923,7 @@ if (defined $stats)
     # timestamp string in SQL format
     my $date =
       sprintf "%04d-%02d-%02d %02d:%02d:%02d",
-	1900+$y0, 1+$mo0, $d0, $h0, $m0, $s0;
+        1900+$y0, 1+$mo0, $d0, $h0, $m0, $s0;
 
     # output CSV result, for a machine
     print "$name,$size,$db1,$db2,$count,",

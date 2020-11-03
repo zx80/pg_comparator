@@ -1,4 +1,4 @@
-# $Id: Makefile 1579 2017-07-07 09:11:54Z coelho $
+# $Id: Makefile 1592 2020-11-03 15:24:21Z coelho $
 
 #
 # PostgreSQL stuff
@@ -6,7 +6,7 @@
 
 name		= pg_comparator
 
-EXTVERSION	= 3.0
+EXTVERSION	= 3.1
 EXTENSION	= pgcmp
 SCRIPTS		= $(name)
 MODULES		= $(EXTENSION)
